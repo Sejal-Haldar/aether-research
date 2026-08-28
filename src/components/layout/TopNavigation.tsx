@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { 
-   
-   
   LayoutGrid, 
   GitBranch, 
   CircleDot, 
@@ -9,30 +7,22 @@ import {
   Download, 
   Sparkles,
   ChevronDown,
-  Layers,
-  
+  Layers
 } from 'lucide-react';
 import { useGraph } from '../../context/GraphContext';
-
 import { SearchFilterBar } from '../SearchFilterBar';
+
 export const TopNavigation: React.FC = () => {
   const { 
-     
     setSearchQuery, 
-     
-     
     layoutMode, 
     applyLayout,
     setIsAddNodeModalOpen,
-    
     exportGraphJSON,
     activeWorkspace
   } = useGraph();
 
-  
   const [isLayoutDropdownOpen, setIsLayoutDropdownOpen] = useState(false);
-
-
 
   return (
     <header className="h-14 border-b border-slate-800/80 flex items-center justify-between px-6 bg-[#0D0F14]/50 backdrop-blur-sm z-10 select-none">
@@ -50,12 +40,13 @@ export const TopNavigation: React.FC = () => {
         <span className="text-slate-300 font-medium">{activeWorkspace.name}</span>
       </div>
 
-<SearchFilterBar onFilterChange={(filters) => setSearchQuery(filters.searchTerm)} />
+      {/* Center: Search & Filter */}
+      <div className="flex-1 max-w-xl mx-4">
+        <SearchFilterBar onFilterChange={(filters) => setSearchQuery(filters.searchTerm)} />
+      </div>
 
       {/* Right: Action Controls & Layout Toggles */}
       <div className="flex items-center gap-2.5">
-
-
         {/* Layout Mode Toggle */}
         <div className="relative">
           <button
