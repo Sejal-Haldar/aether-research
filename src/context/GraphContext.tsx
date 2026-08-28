@@ -106,16 +106,20 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isNodeEditorModalOpen, setIsNodeEditorModalOpen] = useState<boolean>(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
-  // Initial connectivity check with Express Backend API
+  // Load nodes directly from backend database on mount
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/graph-data`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          console.log('Connected to Express API backend successfully:', data);
+    fetch(`${API_BASE_URL}/api/nodes`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load nodes from database');
+        return res.json();
+      })
+      .then((dbNodes) => {
+        const fetchedNodes = Array.isArray(dbNodes) ? dbNodes : dbNodes.nodes;
+        if (Array.isArray(fetchedNodes) && fetchedNodes.length > 0) {
+          setNodes(fetchedNodes);
         }
       })
-      .catch((err) => console.error('Backend connection error:', err));
+      .catch((err) => console.error('Database load error, using fallback initial data:', err));
   }, []);
 
   const activeWorkspace = useMemo(() => {
@@ -172,16 +176,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       notes: data.notes || []
     };
 
-    // Send Node payload to Express backend API
-    fetch(`${API_BASE_URL}/api/nodes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: newNode.title, type: newNode.category, ...newNode }),
-    })
-      .then((res) => res.json())
-      .then((resData) => console.log('Successfully saved node to Express backend:', resData))
-      .catch((err) => console.error('Error saving node to backend:', err));
-
+    // Optimistic local state update
     setNodes(prev => [...prev, newNode]);
 
     if (data.connectToNodeId) {
@@ -195,6 +190,16 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
       setEdges(prev => [...prev, newEdge]);
     }
+
+    // Persist to Express API / Database backend
+    fetch(`${API_BASE_URL}/api/nodes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: newNode.title, type: newNode.category, ...newNode }),
+    })
+      .then((res) => res.json())
+      .then((savedNode) => console.log('Successfully persisted node to DB:', savedNode))
+      .catch((err) => console.error('Error saving node to backend database:', err));
 
     setSelectedNodeId(newId);
     return newId;
@@ -241,6 +246,13 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return [...otherEdges, ...newEdges];
       });
     }
+
+    // Persist node updates to Express backend API
+    fetch(`${API_BASE_URL}/api/nodes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedData),
+    }).catch((err) => console.error('Error persisting node update to backend:', err));
   }, []);
 
   const deleteNode = useCallback((id: string) => {
@@ -252,6 +264,11 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (editingNodeId === id) {
       closeNodeEditor();
     }
+
+    // Persist node deletion to backend API
+    fetch(`${API_BASE_URL}/api/nodes/${id}`, {
+      method: 'DELETE',
+    }).catch((err) => console.error('Error deleting node on backend:', err));
   }, [selectedNodeId, editingNodeId, closeNodeEditor]);
 
   const addEdge = useCallback((sourceId: string, targetId: string, label: string = 'connects_to') => {
