@@ -18,7 +18,7 @@ export const SourceIngestionDrawer: React.FC = () => {
   const { 
     isSourceDrawerOpen, 
     setIsSourceDrawerOpen, 
-    setNodes, 
+    setNodes,
     selectedNodeId, 
     selectedNode,
     addEdge 
@@ -79,43 +79,75 @@ export const SourceIngestionDrawer: React.FC = () => {
     (activeTab === 'text' && rawTextInput.trim().length > 0)
   );
 
-  const handleProcess = () => {
+  const handleProcess = async () => {
     if (!canProcess || isProcessing) return;
     setIsProcessing(true);
 
-    setTimeout(() => {
-      const newNodeId = `node-${Date.now()}`;
-      const title = selectedFile 
-        ? selectedFile.name.replace(/\.[^/.]+$/, "") 
-        : urlInput ? 'Web/DOI Source' : 'Raw Text Entry';
+    try {
+      if (activeTab === 'file' && selectedFile) {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
 
-      // Spawn node near current selected node position if available
-      const spawnX = selectedNode ? selectedNode.x + 260 : 250;
-      const spawnY = selectedNode ? selectedNode.y + 40 : 180;
+        const response = await fetch('http://localhost:5000/api/extract-graph', {
+          method: 'POST',
+          body: formData,
+        });
 
-      setNodes((prevNodes: any[]) => [
-        ...prevNodes,
-        {
-          id: newNodeId,
-          title: title,
-          category: 'SOURCE',
-          description: `Imported via ${activeTab.toUpperCase()} ingestion engine.`,
-          tags: ['#imported', '#source'],
-          status: 'Verified',
-          x: spawnX,
-          y: spawnY,
-          badge: 'SOURCE'
+        if (!response.ok) {
+          throw new Error(`Extraction failed: ${response.statusText}`);
         }
-      ]);
 
-      // Connect automatically to active node if enabled
-      if (autoConnect && selectedNodeId) {
-        addEdge(newNodeId, selectedNodeId, 'references');
+        const data = await response.json();
+
+        if (data.success && data.nodes) {
+          // Append extracted nodes to visual canvas
+          setNodes((prevNodes: any[]) => [...prevNodes, ...data.nodes]);
+
+          // Append extracted edges using addEdge from context
+          if (data.edges && data.edges.length > 0) {
+            data.edges.forEach((edge: any) => {
+              addEdge(edge.source, edge.target, edge.label);
+            });
+          }
+
+          // Auto connect first extracted concept node to active node if selected
+          if (autoConnect && selectedNodeId && data.nodes.length > 0) {
+            addEdge(data.nodes[0].id, selectedNodeId, 'references');
+          }
+        }
+      } else {
+        // Fallback for raw text/URL ingestion
+        const newNodeId = `node-${Date.now()}`;
+        const title = urlInput ? 'Web/DOI Source' : 'Raw Text Entry';
+        const spawnX = selectedNode ? selectedNode.x + 260 : 250;
+        const spawnY = selectedNode ? selectedNode.y + 40 : 180;
+
+        setNodes((prevNodes: any[]) => [
+          ...prevNodes,
+          {
+            id: newNodeId,
+            title: title,
+            category: 'SOURCE',
+            description: `Imported via ${activeTab.toUpperCase()} ingestion engine.`,
+            tags: ['#imported', '#source'],
+            status: 'Verified',
+            x: spawnX,
+            y: spawnY,
+            badge: 'SOURCE'
+          }
+        ]);
+
+        if (autoConnect && selectedNodeId) {
+          addEdge(newNodeId, selectedNodeId, 'references');
+        }
       }
-
+    } catch (error) {
+      console.error('Error extracting knowledge graph:', error);
+      alert('Failed to extract graph from PDF. Please check server logs.');
+    } finally {
       setIsProcessing(false);
       handleClose();
-    }, 1200);
+    }
   };
 
   return (
@@ -141,7 +173,7 @@ export const SourceIngestionDrawer: React.FC = () => {
           </button>
         </div>
 
-        {/* Content Body - Includes pb-24 padding to preserve bottom visibility */}
+        {/* Content Body */}
         <div className="p-5 pb-24 flex-1 overflow-y-auto flex flex-col gap-6">
           
           {/* Active Target Banner */}
@@ -292,7 +324,7 @@ export const SourceIngestionDrawer: React.FC = () => {
               EXTRACTION SETTINGS
             </span>
 
-            {/* Concept Extraction */}
+            {/* Concept Extraction Toggle */}
             <div className="p-3 bg-[#12151E] border border-slate-800/80 rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-lg bg-indigo-950/60 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
@@ -318,7 +350,7 @@ export const SourceIngestionDrawer: React.FC = () => {
               </button>
             </div>
 
-            {/* Auto-Connect toggle */}
+            {/* Auto-Connect Toggle */}
             <div className="p-3 bg-[#12151E] border border-slate-800/80 rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-lg bg-teal-950/60 border border-teal-500/30 flex items-center justify-center text-teal-400">
@@ -370,7 +402,7 @@ export const SourceIngestionDrawer: React.FC = () => {
                 <Check className="w-4 h-4" />
                 <span>Process & Link Source Node</span>
               </>
-            )}
+            ) }
           </button>
           
           <button
