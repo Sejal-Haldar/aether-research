@@ -123,7 +123,7 @@ export const SourceIngestionDrawer: React.FC = () => {
       <div className="w-full max-w-md bg-[#0D0F14] border-l border-slate-800 flex flex-col justify-between h-full shadow-2xl animate-in slide-in-from-right duration-200">
         
         {/* Header */}
-        <div className="p-5 border-b border-slate-800/80 flex items-start justify-between">
+        <div className="p-5 border-b border-slate-800/80 flex items-start justify-between shrink-0 bg-[#0D0F14]">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-cyan-950/60 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
               <Upload className="w-5 h-5" />
@@ -141,8 +141,8 @@ export const SourceIngestionDrawer: React.FC = () => {
           </button>
         </div>
 
-        {/* Content Body */}
-        <div className="p-5 flex-1 overflow-y-auto flex flex-col gap-6">
+        {/* Content Body - Includes pb-24 padding to preserve bottom visibility */}
+        <div className="p-5 pb-24 flex-1 overflow-y-auto flex flex-col gap-6">
           
           {/* Active Target Banner */}
           {selectedNode && (
@@ -350,7 +350,7 @@ export const SourceIngestionDrawer: React.FC = () => {
         </div>
 
         {/* Footer Actions */}
-        <div className="p-5 border-t border-slate-800/80 flex flex-col gap-2">
+        <div className="p-5 border-t border-slate-800/80 flex flex-col gap-2 shrink-0 bg-[#0D0F14]">
           <button
             onClick={handleProcess}
             disabled={!canProcess || isProcessing}
