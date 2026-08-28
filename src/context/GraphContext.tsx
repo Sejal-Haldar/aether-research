@@ -4,6 +4,7 @@ import { INITIAL_NODES, INITIAL_EDGES, INITIAL_WORKSPACES, INITIAL_INSIGHTS } fr
 
 interface GraphContextType {
   nodes: GraphNodeData[];
+  setNodes: React.Dispatch<React.SetStateAction<GraphNodeData[]>>;
   edges: GraphEdgeData[];
   selectedNodeId: string | null;
   selectedNode: GraphNodeData | undefined;
@@ -316,7 +317,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const applyLayout = useCallback((mode: 'free' | 'hierarchical' | 'radial') => {
     setLayoutMode(mode);
     if (mode === 'hierarchical') {
-      // Clean tree layout
       const levels: { [key: string]: number } = {
         'node-bert': 0,
         'node-roberta': 0,
@@ -420,6 +420,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <GraphContext.Provider
       value={{
         nodes,
+        setNodes,
         edges,
         selectedNodeId,
         selectedNode,
