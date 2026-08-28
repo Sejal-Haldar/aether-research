@@ -3,7 +3,11 @@ import cors from 'cors';
 import multer from 'multer';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+
+// Handle CJS/ESM interop fallback for pdf-parse
+const pdfParseModule = require('pdf-parse');
+const pdfParse = pdfParseModule.default || pdfParseModule;
+
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
