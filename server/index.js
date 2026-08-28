@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -10,10 +13,15 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Initialize Multer (Memory Storage) and Gemini API Client
-const upload = multer({ storage: multer.memoryStorage() });
+// Multer disk storage writes uploads directly to disk to avoid server RAM overhead on large files
+const upload = multer({
+  dest: os.tmpdir(),
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB max file size limit
+});
+
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // Baseline default nodes structure matching frontend state
@@ -125,7 +133,6 @@ const initialNodes = [
   }
 ];
 
-// Seed memory storage with baseline nodes
 let storedNodes = [...initialNodes];
 
 // --- GRAPH API ENDPOINTS ---
@@ -163,15 +170,81 @@ app.get('/api/graph-data', (req, res) => {
   res.json({ success: true, nodes: storedNodes });
 });
 
-// --- AI EXTRACTION PIPELINE ENDPOINT (NATIVE GEMINI PDF INPUT) ---
+// --- EXTRACTION PIPELINE (LARGE FILES & URL SUPPORT) ---
 
 app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
+  let tempFilePath = null;
+  let uploadedFile = null;
+
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No PDF file provided in request.' });
+    let contentsPayload = [];
+
+    // Case 1: PDF File Upload (Large or Small)
+    if (req.file) {
+      uploadedFile = await ai.files.upload({
+        file: req.file.path,
+        config: { mimeType: req.file.mimetype || 'application/pdf' }
+      });
+
+      contentsPayload = [
+        {
+          fileData: {
+            fileUri: uploadedFile.uri,
+            mimeType: uploadedFile.mimeType
+          }
+        },
+        'Analyze the uploaded document and extract key concepts and relationships between them.'
+      ];
+    } 
+    // Case 2: Web URL or Direct PDF Link
+    else if (req.body && req.body.url) {
+      const targetUrl = req.body.url;
+      const urlResponse = await fetch(targetUrl);
+
+      if (!urlResponse.ok) {
+        return res.status(400).json({ error: `Failed to fetch URL: ${urlResponse.statusText}` });
+      }
+
+      const contentType = urlResponse.headers.get('content-type') || '';
+
+      if (contentType.includes('application/pdf') || targetUrl.toLowerCase().endsWith('.pdf')) {
+        const arrayBuffer = await urlResponse.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        tempFilePath = path.join(os.tmpdir(), `link-${Date.now()}.pdf`);
+        fs.writeFileSync(tempFilePath, buffer);
+
+        uploadedFile = await ai.files.upload({
+          file: tempFilePath,
+          config: { mimeType: 'application/pdf' }
+        });
+
+        contentsPayload = [
+          {
+            fileData: {
+              fileUri: uploadedFile.uri,
+              mimeType: uploadedFile.mimeType
+            }
+          },
+          'Analyze the document from the link and extract key concepts and relationships between them.'
+        ];
+      } else {
+        const textHtml = await urlResponse.text();
+        const cleanText = textHtml
+          .replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, '')
+          .replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, '')
+          .replace(/<[^>]*>?/gm, ' ')
+          .replace(/\s+/g, ' ')
+          .slice(0, 40000);
+
+        contentsPayload = [
+          `Analyze the following webpage content from ${targetUrl} and extract key concepts and relationships between them:\n\n${cleanText}`
+        ];
+      }
+    } else {
+      return res.status(400).json({ error: 'Please provide either a PDF file or a URL link.' });
     }
 
-    // 1. Define structured JSON output schema for Gemini
+    // Response Schema Definition
     const responseSchema = {
       type: Type.OBJECT,
       properties: {
@@ -181,7 +254,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
             type: Type.OBJECT,
             properties: {
               name: { type: Type.STRING, description: 'Name of the entity or concept' },
-              type: { type: Type.STRING, description: 'Category (e.g., ARCHITECTURE, MODEL, MECHANISM)' },
+              type: { type: Type.STRING, description: 'Category (e.g., ARCHITECTURE, MODEL, MECHANISM, CIRCUIT)' },
               description: { type: Type.STRING, description: 'Short description based on text' }
             },
             required: ['name', 'type', 'description']
@@ -203,20 +276,10 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       required: ['concepts', 'relationships']
     };
 
-    // 2. Convert PDF buffer to Base64 and send directly to Gemini 2.5 Flash
-    const pdfBase64 = req.file.buffer.toString('base64');
-
-    const response = await ai.models.generateContent({
+    // Gemini 3.6 Flash Call
+    const modelResponse = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
-      contents: [
-        {
-          inlineData: {
-            mimeType: 'application/pdf',
-            data: pdfBase64
-          }
-        },
-        'Analyze the uploaded document and extract key concepts and relationships between them.'
-      ],
+      contents: contentsPayload,
       config: {
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
@@ -224,9 +287,8 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       }
     });
 
-    const graphPayload = JSON.parse(response.text);
+    const graphPayload = JSON.parse(modelResponse.text);
 
-    // 3. Format concepts into renderable canvas nodes
     const formattedNodes = (graphPayload.concepts || []).map((concept, index) => {
       const slugId = `node-${concept.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const col = index % 3;
@@ -255,7 +317,6 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       };
     });
 
-    // 4. Format relationships into renderable edges
     const formattedEdges = (graphPayload.relationships || []).map((rel, index) => {
       const sourceId = `node-${rel.source.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const targetId = `node-${rel.target.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
@@ -268,10 +329,8 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       };
     });
 
-    // 5. Save new nodes into memory storage
     storedNodes = [...storedNodes, ...formattedNodes];
 
-    // 6. Send formatted nodes and edges to frontend
     res.json({
       success: true,
       nodes: formattedNodes,
@@ -279,8 +338,19 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
     });
 
   } catch (err) {
-    console.error('PDF Extraction Failure:', err);
-    res.status(500).json({ error: 'Failed to process PDF', details: err.message });
+    console.error('PDF/URL Extraction Failure:', err);
+    res.status(500).json({ error: 'Failed to process input source', details: err.message });
+  } finally {
+    // Disk and Cloud Cleanup
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
+    }
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+    }
+    if (uploadedFile && uploadedFile.name) {
+      try { await ai.files.delete({ name: uploadedFile.name }); } catch (e) {}
+    }
   }
 });
 
