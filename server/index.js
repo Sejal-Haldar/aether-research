@@ -133,12 +133,10 @@ let storedNodes = [...initialNodes];
 
 // --- EXISTING GRAPH API ENDPOINTS ---
 
-// GET: Send default + newly created nodes back to frontend
 app.get('/api/nodes', (req, res) => {
   res.status(200).json(storedNodes);
 });
 
-// POST: Add or update a node in memory
 app.post('/api/nodes', (req, res) => {
   const newNode = req.body;
   const existingIndex = storedNodes.findIndex((n) => n.id === newNode.id);
@@ -152,27 +150,23 @@ app.post('/api/nodes', (req, res) => {
   res.status(201).json(newNode);
 });
 
-// PUT: Update an existing node
 app.put('/api/nodes/:id', (req, res) => {
   const { id } = req.params;
   storedNodes = storedNodes.map((node) => (node.id === id ? { ...node, ...req.body } : node));
   res.status(200).json({ success: true });
 });
 
-// DELETE: Remove a node by ID
 app.delete('/api/nodes/:id', (req, res) => {
   const { id } = req.params;
   storedNodes = storedNodes.filter((node) => node.id !== id);
   res.status(200).json({ success: true });
 });
 
-// Health check endpoint
 app.get('/api/graph-data', (req, res) => {
   res.json({ success: true, nodes: storedNodes });
 });
 
-
-// --- NEW AI EXTRACTION PIPELINE ENDPOINT ---
+// --- FIXED AI EXTRACTION PIPELINE ENDPOINT ---
 
 app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
   try {
@@ -200,7 +194,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
             type: Type.OBJECT,
             properties: {
               name: { type: Type.STRING, description: "Name of the entity or concept" },
-              type: { type: Type.STRING, description: "Category (e.g., concept, architecture, algorithm, metric)" },
+              type: { type: Type.STRING, description: "Category (e.g., ARCHITECTURE, MODEL, MECHANISM)" },
               description: { type: Type.STRING, description: "Short description based on text" }
             },
             required: ["name", "type", "description"]
@@ -235,16 +229,65 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       }
     });
 
-    // 4. Send back structured JSON
     const graphPayload = JSON.parse(response.text);
-    res.json(graphPayload);
+
+    // 4. Format concepts into renderable canvas nodes
+    const formattedNodes = graphPayload.concepts.map((concept, index) => {
+      const slugId = `node-${concept.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      const col = index % 3;
+      const row = Math.floor(index / 3);
+
+      return {
+        id: slugId,
+        title: concept.name,
+        category: (concept.type || 'CONCEPT').toUpperCase(),
+        categories: [(concept.type || 'CONCEPT').toUpperCase()],
+        badge: (concept.type || 'CONCEPT').toUpperCase(),
+        description: concept.description,
+        tags: [concept.type.toLowerCase(), 'extracted'],
+        x: 100 + col * 300,
+        y: 100 + row * 240,
+        glow: index === 0,
+        status: 'Extracted',
+        complexityMatrix: {
+          timeComplexity: 'Dynamic',
+          spaceComplexity: 'Dynamic',
+          parallelizable: 'Medium',
+          parameters: 'N/A',
+          type: concept.type || 'Entity'
+        },
+        notes: []
+      };
+    });
+
+    // 5. Format relationships into renderable edges
+    const formattedEdges = graphPayload.relationships.map((rel, index) => {
+      const sourceId = `node-${rel.source.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+      const targetId = `node-${rel.target.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+
+      return {
+        id: `edge-${index}-${Date.now()}`,
+        source: sourceId,
+        target: targetId,
+        label: rel.type
+      };
+    });
+
+    // 6. Save new nodes into memory storage
+    storedNodes = [...storedNodes, ...formattedNodes];
+
+    // 7. Send formatted nodes and edges to frontend
+    res.json({
+      success: true,
+      nodes: formattedNodes,
+      edges: formattedEdges
+    });
 
   } catch (err) {
     console.error('PDF Extraction Failure:', err);
     res.status(500).json({ error: 'Failed to process PDF', details: err.message });
   }
 });
-
 
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
