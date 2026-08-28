@@ -1,12 +1,23 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import fs from 'fs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
-// Bypass pdf-parse index.js module.parent check by pointing directly to lib
-const pdfParseRaw = require('pdf-parse/lib/pdf-parse.js');
-const pdfParse = typeof pdfParseRaw === 'function' ? pdfParseRaw : (pdfParseRaw.default || pdfParseRaw);
+// Bypass pdf-parse ESM debug crash by mocking missing test file read on import
+const originalReadFileSync = fs.readFileSync;
+fs.readFileSync = function (path, ...args) {
+  if (typeof path === 'string' && path.includes('05-versions-space.pdf')) {
+    return Buffer.from('');
+  }
+  return originalReadFileSync.call(fs, path, ...args);
+};
+
+const pdfParseModule = require('pdf-parse');
+fs.readFileSync = originalReadFileSync; // Restore standard file reading
+
+const pdfParse = typeof pdfParseModule === 'function' ? pdfParseModule : (pdfParseModule.default || pdfParseModule);
 
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
@@ -132,10 +143,10 @@ const initialNodes = [
   }
 ];
 
-// Seed memory storage with the baseline nodes
+// Seed memory storage with baseline nodes
 let storedNodes = [...initialNodes];
 
-// --- EXISTING GRAPH API ENDPOINTS ---
+// --- GRAPH API ENDPOINTS ---
 
 app.get('/api/nodes', (req, res) => {
   res.status(200).json(storedNodes);
@@ -170,7 +181,7 @@ app.get('/api/graph-data', (req, res) => {
   res.json({ success: true, nodes: storedNodes });
 });
 
-// --- FIXED AI EXTRACTION PIPELINE ENDPOINT ---
+// --- AI EXTRACTION PIPELINE ENDPOINT ---
 
 app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
   try {
@@ -220,7 +231,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       required: ["concepts", "relationships"]
     };
 
-    // 3. Prompt the model with extracted text
+    // 3. Prompt model with extracted text
     const prompt = `Analyze the following document text and extract key concepts and relationships between them:\n\n${text.substring(0, 35000)}`;
 
     const response = await ai.models.generateContent({
