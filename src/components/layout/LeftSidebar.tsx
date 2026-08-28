@@ -12,7 +12,8 @@ import {
   Sparkles, 
   Layers,
   ChevronRight,
-  Database
+  Database,
+  Upload
 } from 'lucide-react';
 import { useGraph } from '../../context/GraphContext';
 
@@ -22,6 +23,7 @@ export const LeftSidebar: React.FC = () => {
     setActiveNavTab, 
     activeWorkspace, 
     setIsNewWorkspaceModalOpen,
+    setIsSourceDrawerOpen,
     nodes,
     edges
   } = useGraph();
@@ -137,6 +139,15 @@ export const LeftSidebar: React.FC = () => {
         >
           <Plus className="w-3.5 h-3.5" />
           <span>New Workspace</span>
+        </button>
+
+        {/* Import Research Source CTA */}
+        <button
+          onClick={() => setIsSourceDrawerOpen(true)}
+          className="w-full py-2 bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 hover:border-cyan-500/50 text-cyan-300 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-all shadow-[0_0_12px_rgba(6,182,212,0.1)] hover:shadow-[0_0_16px_rgba(6,182,212,0.2)]"
+        >
+          <Upload className="w-3.5 h-3.5" />
+          <span>Import Source</span>
         </button>
 
         {/* Bottom Utility Links */}

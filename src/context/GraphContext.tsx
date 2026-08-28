@@ -20,6 +20,7 @@ interface GraphContextType {
   isAddNoteModalOpen: boolean;
   isInsightsDrawerOpen: boolean;
   isNodeEditorModalOpen: boolean;
+  isSourceDrawerOpen: boolean;
   editingNodeId: string | null;
   editingNode: GraphNodeData | undefined;
   showGrid: boolean;
@@ -48,6 +49,7 @@ interface GraphContextType {
   setIsNewWorkspaceModalOpen: (open: boolean) => void;
   setIsAddNoteModalOpen: (open: boolean) => void;
   setIsInsightsDrawerOpen: (open: boolean) => void;
+  setIsSourceDrawerOpen: (open: boolean) => void;
   openNodeEditor: (nodeId: string) => void;
   closeNodeEditor: () => void;
   setShowGrid: (show: boolean) => void;
@@ -86,6 +88,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isNewWorkspaceModalOpen, setIsNewWorkspaceModalOpen] = useState<boolean>(false);
   const [isAddNoteModalOpen, setIsAddNoteModalOpen] = useState<boolean>(false);
   const [isInsightsDrawerOpen, setIsInsightsDrawerOpen] = useState<boolean>(false);
+  const [isSourceDrawerOpen, setIsSourceDrawerOpen] = useState<boolean>(false);
   const [isNodeEditorModalOpen, setIsNodeEditorModalOpen] = useState<boolean>(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
@@ -459,6 +462,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsNewWorkspaceModalOpen,
         setIsAddNoteModalOpen,
         setIsInsightsDrawerOpen,
+        isSourceDrawerOpen,
+        setIsSourceDrawerOpen,
         openNodeEditor,
         closeNodeEditor,
         setShowGrid,
