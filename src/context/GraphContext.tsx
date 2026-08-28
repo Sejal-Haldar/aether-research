@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useMemo, useCall
 import { GraphNodeData, GraphEdgeData, WorkspaceData, GraphInsight, NodeCategory } from '../types/graph';
 import { INITIAL_NODES, INITIAL_EDGES, INITIAL_WORKSPACES, INITIAL_INSIGHTS } from '../data/initialGraphData';
 
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "https://aether-research.onrender.com";
+
 interface GraphContextType {
   nodes: GraphNodeData[];
   setNodes: React.Dispatch<React.SetStateAction<GraphNodeData[]>>;
@@ -106,7 +108,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Initial connectivity check with Express Backend API
   useEffect(() => {
-    fetch('http://localhost:5000/api/graph-data')
+    fetch(`${API_BASE_URL}/api/graph-data`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success) {
@@ -171,7 +173,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     // Send Node payload to Express backend API
-    fetch('http://localhost:5000/api/nodes', {
+    fetch(`${API_BASE_URL}/api/nodes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ label: newNode.title, type: newNode.category, ...newNode }),
