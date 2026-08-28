@@ -145,12 +145,22 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setEditingNodeId(null);
   }, []);
 
+  // Updated: Saves dragged node coordinates directly to the backend API
   const updateNodePosition = useCallback((id: string, x: number, y: number) => {
     setNodes(prev => prev.map(node => node.id === id ? { ...node, x, y } : node));
+
+    fetch(`${API_BASE_URL}/api/nodes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ x, y }),
+    }).catch((err) => console.error('Error updating node position on backend:', err));
   }, []);
 
+  // Updated: Calculates vertical offset to prevent nodes from spawning on top of each other
   const addNode = useCallback((data: Partial<GraphNodeData> & { title: string; category: NodeCategory; description: string; connectToNodeId?: string; edgeLabel?: string }): string => {
     const newId = `node-${Date.now()}`;
+    const maxY = nodes.length > 0 ? Math.max(...nodes.map(n => n.y)) : 80;
+
     const newNode: GraphNodeData = {
       id: newId,
       title: data.title,
@@ -159,8 +169,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       badge: data.badge || data.category,
       description: data.description,
       tags: data.tags || ['RESEARCH', data.category],
-      x: data.x ?? (Math.floor(Math.random() * 300) + 150),
-      y: data.y ?? (Math.floor(Math.random() * 200) + 150),
+      x: data.x ?? (nodes.length % 2 === 0 ? 380 : 680),
+      y: data.y ?? (maxY + 220),
       glow: data.glow ?? false,
       status: data.status || 'Verified',
       doi: data.doi,
@@ -191,19 +201,19 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setEdges(prev => [...prev, newEdge]);
     }
 
-    // Persist to Express API / Database backend
+    // Persist to Express API backend
     fetch(`${API_BASE_URL}/api/nodes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ label: newNode.title, type: newNode.category, ...newNode }),
     })
       .then((res) => res.json())
-      .then((savedNode) => console.log('Successfully persisted node to DB:', savedNode))
+      .then((savedNode) => console.log('Successfully persisted node to backend:', savedNode))
       .catch((err) => console.error('Error saving node to backend database:', err));
 
     setSelectedNodeId(newId);
     return newId;
-  }, []);
+  }, [nodes]);
 
   const updateNode = useCallback((
     id: string, 
