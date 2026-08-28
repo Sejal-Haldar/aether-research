@@ -4,9 +4,9 @@ import multer from 'multer';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
-// Handle CJS/ESM interop fallback for pdf-parse
-const pdfParseModule = require('pdf-parse');
-const pdfParse = pdfParseModule.default || pdfParseModule;
+// Bypass pdf-parse index.js module.parent check by pointing directly to lib
+const pdfParseRaw = require('pdf-parse/lib/pdf-parse.js');
+const pdfParse = typeof pdfParseRaw === 'function' ? pdfParseRaw : (pdfParseRaw.default || pdfParseRaw);
 
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
