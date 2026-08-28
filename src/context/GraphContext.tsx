@@ -13,11 +13,15 @@ interface GraphContextType {
   insights: GraphInsight[];
   searchQuery: string;
   categoryFilter: NodeCategory | 'ALL';
+  activeFilters: string[];
+  selectedTagFilters: string[];
   zoom: number;
   pan: { x: number; y: number };
   isCommandPaletteOpen: boolean;
   isAddNodeModalOpen: boolean;
+  isAddModalOpen: boolean;
   isNewWorkspaceModalOpen: boolean;
+  isWorkspaceModalOpen: boolean;
   isAddNoteModalOpen: boolean;
   isInsightsDrawerOpen: boolean;
   isNodeEditorModalOpen: boolean;
@@ -39,6 +43,8 @@ interface GraphContextType {
   addNoteToNode: (nodeId: string, content: string, author?: string) => void;
   setSearchQuery: (q: string) => void;
   setCategoryFilter: (cat: NodeCategory | 'ALL') => void;
+  setActiveFilters: React.Dispatch<React.SetStateAction<string[]>>;
+  setSelectedTagFilters: React.Dispatch<React.SetStateAction<string[]>>;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   zoomIn: () => void;
@@ -47,7 +53,9 @@ interface GraphContextType {
   fitToView: () => void;
   setIsCommandPaletteOpen: (open: boolean) => void;
   setIsAddNodeModalOpen: (open: boolean) => void;
+  setIsAddModalOpen: (open: boolean) => void;
   setIsNewWorkspaceModalOpen: (open: boolean) => void;
+  setIsWorkspaceModalOpen: (open: boolean) => void;
   setIsAddNoteModalOpen: (open: boolean) => void;
   setIsInsightsDrawerOpen: (open: boolean) => void;
   setIsSourceDrawerOpen: (open: boolean) => void;
@@ -58,6 +66,7 @@ interface GraphContextType {
   switchWorkspace: (workspaceId: string) => void;
   createWorkspace: (name: string, domain: string) => void;
   applyLayout: (mode: 'free' | 'hierarchical' | 'radial') => void;
+  setLayoutMode: (mode: 'free' | 'hierarchical' | 'radial') => void;
   resolveInsight: (insightId: string) => void;
   exportGraphJSON: () => void;
 }
@@ -71,12 +80,14 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [edges, setEdges] = useState<GraphEdgeData[]>(INITIAL_EDGES);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>('node-transformers');
   const [insights, setInsights] = useState<GraphInsight[]>(INITIAL_INSIGHTS);
-  
+
   // Navigation & Filtering
   const [activeNavTab, setActiveNavTab] = useState<string>('Explore Graph');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<NodeCategory | 'ALL'>('ALL');
-  const [layoutMode, setLayoutMode] = useState<'free' | 'hierarchical' | 'radial'>('free');
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [selectedTagFilters, setSelectedTagFilters] = useState<string[]>([]);
+  const [layoutMode, setLayoutModeState] = useState<'free' | 'hierarchical' | 'radial'>('free');
 
   // Canvas Transform
   const [zoom, setZoom] = useState<number>(1);
@@ -116,12 +127,10 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setEditingNodeId(null);
   }, []);
 
-  // Node position updater
   const updateNodePosition = useCallback((id: string, x: number, y: number) => {
     setNodes(prev => prev.map(node => node.id === id ? { ...node, x, y } : node));
   }, []);
 
-  // Add Node
   const addNode = useCallback((data: Partial<GraphNodeData> & { title: string; category: NodeCategory; description: string; connectToNodeId?: string; edgeLabel?: string }): string => {
     const newId = `node-${Date.now()}`;
     const newNode: GraphNodeData = {
@@ -151,7 +160,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setNodes(prev => [...prev, newNode]);
 
-    // Add connection if requested
     if (data.connectToNodeId) {
       const newEdge: GraphEdgeData = {
         id: `edge-${newId}-${data.connectToNodeId}`,
@@ -168,7 +176,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return newId;
   }, []);
 
-  // Update Node & its connections
   const updateNode = useCallback((
     id: string, 
     updatedData: Partial<GraphNodeData>, 
@@ -195,13 +202,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return node;
     }));
 
-    // Update edges if provided
     if (updatedConnections) {
       setEdges(prevEdges => {
-        // Remove existing edges where this node is source
         const otherEdges = prevEdges.filter(e => e.source !== id);
-        
-        // Construct new outgoing edges
         const newEdges: GraphEdgeData[] = updatedConnections.map((conn, idx) => ({
           id: conn.id || `edge-${id}-${conn.targetId}-${Date.now()}-${idx}`,
           source: id,
@@ -216,7 +219,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Delete Node
   const deleteNode = useCallback((id: string) => {
     setNodes(prev => prev.filter(n => n.id !== id));
     setEdges(prev => prev.filter(e => e.source !== id && e.target !== id));
@@ -228,7 +230,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [selectedNodeId, editingNodeId, closeNodeEditor]);
 
-  // Add Edge
   const addEdge = useCallback((sourceId: string, targetId: string, label: string = 'connects_to') => {
     const existing = edges.find(e => (e.source === sourceId && e.target === targetId) || (e.source === targetId && e.target === sourceId));
     if (existing) return;
@@ -244,12 +245,10 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setEdges(prev => [...prev, newEdge]);
   }, [edges]);
 
-  // Delete Edge
   const deleteEdge = useCallback((id: string) => {
     setEdges(prev => prev.filter(e => e.id !== id));
   }, []);
 
-  // Add Note to Node
   const addNoteToNode = useCallback((nodeId: string, content: string, author: string = 'Aether Architect') => {
     const newNote = {
       id: `note-${Date.now()}`,
@@ -274,7 +273,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, []);
 
-  // Zoom Controls
   const zoomIn = useCallback(() => {
     setZoom(prev => Math.min(prev + 0.15, 2.5));
   }, []);
@@ -313,9 +311,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [nodes, resetView]);
 
-  // Layout Algorithms
   const applyLayout = useCallback((mode: 'free' | 'hierarchical' | 'radial') => {
-    setLayoutMode(mode);
+    setLayoutModeState(mode);
     if (mode === 'hierarchical') {
       const levels: { [key: string]: number } = {
         'node-bert': 0,
@@ -351,7 +348,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Workspaces
   const switchWorkspace = useCallback((workspaceId: string) => {
     setActiveWorkspaceId(workspaceId);
   }, []);
@@ -370,7 +366,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setActiveWorkspaceId(newWs.id);
   }, []);
 
-  // Resolve Insight
   const resolveInsight = useCallback((insightId: string) => {
     const targetInsight = insights.find(i => i.id === insightId);
     if (!targetInsight) return;
@@ -384,7 +379,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setInsights(prev => prev.filter(i => i.id !== insightId));
   }, [insights, addEdge]);
 
-  // Export
   const exportGraphJSON = useCallback(() => {
     const data = {
       workspace: activeWorkspace,
@@ -401,7 +395,6 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     URL.revokeObjectURL(url);
   }, [activeWorkspace, nodes, edges]);
 
-  // Sync workspace node & edge count
   useEffect(() => {
     setWorkspaces(prev => prev.map(w => {
       if (w.id === activeWorkspaceId) {
@@ -429,11 +422,15 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         insights,
         searchQuery,
         categoryFilter,
+        activeFilters,
+        selectedTagFilters,
         zoom,
         pan,
         isCommandPaletteOpen,
         isAddNodeModalOpen,
+        isAddModalOpen: isAddNodeModalOpen,
         isNewWorkspaceModalOpen,
+        isWorkspaceModalOpen: isNewWorkspaceModalOpen,
         isAddNoteModalOpen,
         isInsightsDrawerOpen,
         isNodeEditorModalOpen,
@@ -452,6 +449,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addNoteToNode,
         setSearchQuery,
         setCategoryFilter,
+        setActiveFilters,
+        setSelectedTagFilters,
         setZoom,
         setPan,
         zoomIn,
@@ -460,7 +459,9 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         fitToView,
         setIsCommandPaletteOpen,
         setIsAddNodeModalOpen,
+        setIsAddModalOpen: setIsAddNodeModalOpen,
         setIsNewWorkspaceModalOpen,
+        setIsWorkspaceModalOpen: setIsNewWorkspaceModalOpen,
         setIsAddNoteModalOpen,
         setIsInsightsDrawerOpen,
         isSourceDrawerOpen,
@@ -472,6 +473,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         switchWorkspace,
         createWorkspace,
         applyLayout,
+        setLayoutMode: applyLayout,
         resolveInsight,
         exportGraphJSON
       }}
