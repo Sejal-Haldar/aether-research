@@ -2,38 +2,46 @@ import express from 'express';
 import cors from 'cors';
 
 const app = express();
-const PORT = 5000;
+// Dynamic port for Render deployment
+const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-// GET: Endpoint for initial graph data
-app.get('/api/graph-data', (req, res) => {
-  res.json({
-    success: true,
-    workspaces: ['Default Workspace', 'Project Alpha'],
-    nodes: [
-      { id: '1', label: 'First Node' },
-      { id: '2', label: 'Second Node' }
-    ]
-  });
+// In-memory array to store graph nodes during the active server session
+let storedNodes = [];
+
+// GET: Fetch all saved nodes (fixes the 404 error)
+app.get('/api/nodes', (req, res) => {
+  res.status(200).json(storedNodes);
 });
 
-// POST: Endpoint to create a new node
+// POST: Save new incoming node payload
 app.post('/api/nodes', (req, res) => {
-  const { label, type } = req.body;
+  const newNode = req.body;
+  storedNodes.push(newNode);
+  res.status(201).json(newNode);
+});
 
-  const newNode = {
-    id: `node-${Date.now()}`,
-    label: label || 'New Backend Node',
-    type: type || 'MECHANISM',
-    description: 'Created dynamically via Express backend API.',
-    tags: ['#custom', '#api']
-  };
+// PUT: Update an existing node
+app.put('/api/nodes/:id', (req, res) => {
+  const { id } = req.params;
+  storedNodes = storedNodes.map((node) => (node.id === id ? { ...node, ...req.body } : node));
+  res.status(200).json({ success: true });
+});
 
-  res.status(201).json({ success: true, node: newNode });
+// DELETE: Remove a node by ID
+app.delete('/api/nodes/:id', (req, res) => {
+  const { id } = req.params;
+  storedNodes = storedNodes.filter((node) => node.id !== id);
+  res.status(200).json({ success: true });
+});
+
+// Health check endpoint
+app.get('/api/graph-data', (req, res) => {
+  res.json({ success: true, nodes: storedNodes });
 });
 
 app.listen(PORT, () => {
-  console.log(`Backend running on http://localhost:${PORT}`);
+  console.log(`Backend running on port ${PORT}`);
 });
