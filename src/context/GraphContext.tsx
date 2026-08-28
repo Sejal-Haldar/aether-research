@@ -104,6 +104,18 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isNodeEditorModalOpen, setIsNodeEditorModalOpen] = useState<boolean>(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
+  // Initial connectivity check with Express Backend API
+  useEffect(() => {
+    fetch('http://localhost:5000/api/graph-data')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          console.log('Connected to Express API backend successfully:', data);
+        }
+      })
+      .catch((err) => console.error('Backend connection error:', err));
+  }, []);
+
   const activeWorkspace = useMemo(() => {
     return workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
   }, [workspaces, activeWorkspaceId]);
@@ -157,6 +169,16 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       },
       notes: data.notes || []
     };
+
+    // Send Node payload to Express backend API
+    fetch('http://localhost:5000/api/nodes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: newNode.title, type: newNode.category, ...newNode }),
+    })
+      .then((res) => res.json())
+      .then((resData) => console.log('Successfully saved node to Express backend:', resData))
+      .catch((err) => console.error('Error saving node to backend:', err));
 
     setNodes(prev => [...prev, newNode]);
 
