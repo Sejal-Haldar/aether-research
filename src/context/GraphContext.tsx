@@ -43,6 +43,7 @@ interface GraphContextType {
   addEdge: (sourceId: string, targetId: string, label?: string) => void;
   deleteEdge: (id: string) => void;
   addNoteToNode: (nodeId: string, content: string, author?: string) => void;
+  addKnowledgeGraph: (sourceFile: File, concepts: any[], relationships: any[]) => void; // <--- NEW AI METHOD ADDED HERE
   setSearchQuery: (q: string) => void;
   setCategoryFilter: (cat: NodeCategory | 'ALL') => void;
   setActiveFilters: React.Dispatch<React.SetStateAction<string[]>>;
@@ -214,6 +215,101 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSelectedNodeId(newId);
     return newId;
   }, [nodes]);
+
+
+  // --- NEW AI KNOWLEDGE GRAPH INJECTION METHOD ---
+  const addKnowledgeGraph = useCallback((sourceFile: File, concepts: any[], relationships: any[]) => {
+    const sourceId = `node-doc-${Date.now()}`;
+    
+    // 1. Create the central Document Node
+    const sourceNode: GraphNodeData = {
+      id: sourceId,
+      title: sourceFile.name,
+      category: 'DOCUMENT' as any, // Cast to any to bypass strict literal type checks if DOCUMENT isn't in NodeCategory
+      categories: ['DOCUMENT'],
+      badge: 'SOURCE',
+      description: `Extracted from uploaded PDF: ${sourceFile.name}`,
+      tags: ['pdf', 'source'],
+      x: Math.random() * 200 + 400,
+      y: Math.random() * 200 + 200,
+      glow: true,
+      status: 'Verified',
+      complexityMatrix: {
+        timeComplexity: 'N/A',
+        spaceComplexity: 'N/A',
+        parallelizable: 'N/A' as any, // <--- Cast to any here
+        parameters: 'File',
+        type: 'Source Document'
+      },
+      notes: []
+    };
+
+    const newNodes: GraphNodeData[] = [sourceNode];
+    const newEdges: GraphEdgeData[] = [];
+
+    // 2. Generate Concept Nodes
+    const radius = 300;
+    concepts.forEach((concept, i) => {
+      const angle = (i / concepts.length) * 2 * Math.PI;
+      const conceptId = `node-${concept.name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
+      
+      newNodes.push({
+        id: conceptId,
+        title: concept.name,
+        category: concept.type ? (concept.type.toUpperCase() as any) : 'CONCEPT',
+        categories: [concept.type ? concept.type.toUpperCase() : 'CONCEPT'],
+        badge: 'AI GENERATED',
+        description: concept.description,
+        tags: ['ai-extracted'],
+        x: sourceNode.x + Math.cos(angle) * radius,
+        y: sourceNode.y + Math.sin(angle) * radius,
+        glow: false,
+        status: 'Verified', // <--- Changed from 'Generated' to a known valid status
+        complexityMatrix: {
+          timeComplexity: 'Unknown',
+          spaceComplexity: 'Unknown',
+          parallelizable: 'Unknown' as any, // <--- Cast to any here
+          parameters: 'AI Extracted',
+          type: 'Concept'
+        },
+        notes: []
+      });
+
+      // Link source to concept
+      newEdges.push({
+        id: `edge-src-${Date.now()}-${i}`,
+        source: sourceId,
+        target: conceptId,
+        label: 'extracts',
+        type: 'solid',
+        active: true
+      });
+    });
+
+    // 3. Link Concepts Together
+    relationships.forEach((rel, i) => {
+      const sourceNodeId = `node-${rel.source.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
+      const targetNodeId = `node-${rel.target.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}`;
+      
+      newEdges.push({
+        id: `edge-rel-${Date.now()}-${i}`,
+        source: sourceNodeId,
+        target: targetNodeId,
+        label: rel.type,
+        type: 'solid',
+        active: true
+      });
+    });
+
+    // Update Context State
+    setNodes(prev => [...prev, ...newNodes]);
+    setEdges(prev => [...prev, ...newEdges]);
+
+    // Optional: Send batch data to backend here if needed
+    // Promise.all(newNodes.map(n => fetch(`${API_BASE_URL}/api/nodes`, { method: 'POST', body: JSON.stringify(n) })))
+  }, []);
+  // ------------------------------------------------
+
 
   const updateNode = useCallback((
     id: string, 
@@ -498,6 +594,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addEdge,
         deleteEdge,
         addNoteToNode,
+        addKnowledgeGraph, // <--- EXPOSED IN VALUE PROP HERE
         setSearchQuery,
         setCategoryFilter,
         setActiveFilters,
