@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
-  Search, 
-  Filter, 
+   
+   
   LayoutGrid, 
   GitBranch, 
   CircleDot, 
@@ -10,36 +10,29 @@ import {
   Sparkles,
   ChevronDown,
   Layers,
-  Check
+  
 } from 'lucide-react';
 import { useGraph } from '../../context/GraphContext';
-import { NodeCategory } from '../../types/graph';
+
 import { SearchFilterBar } from '../SearchFilterBar';
 export const TopNavigation: React.FC = () => {
   const { 
-    searchQuery, 
+     
     setSearchQuery, 
-    categoryFilter, 
-    setCategoryFilter, 
+     
+     
     layoutMode, 
     applyLayout,
     setIsAddNodeModalOpen,
-    setIsCommandPaletteOpen,
+    
     exportGraphJSON,
     activeWorkspace
   } = useGraph();
 
-  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+  
   const [isLayoutDropdownOpen, setIsLayoutDropdownOpen] = useState(false);
 
-  const categories: { label: string; value: NodeCategory | 'ALL' }[] = [
-    { label: 'All Categories', value: 'ALL' },
-    { label: 'Model', value: 'MODEL' },
-    { label: 'Architecture', value: 'ARCHITECTURE' },
-    { label: 'Mechanism', value: 'MECHANISM' },
-    { label: 'Dataset', value: 'DATASET' },
-    { label: 'Metric', value: 'METRIC' },
-  ];
+
 
   return (
     <header className="h-14 border-b border-slate-800/80 flex items-center justify-between px-6 bg-[#0D0F14]/50 backdrop-blur-sm z-10 select-none">
