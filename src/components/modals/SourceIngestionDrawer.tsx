@@ -7,20 +7,29 @@ import {
   Sparkles, 
   Check, 
   Loader2,
-  File
+  File,
+  GitCommit
 } from 'lucide-react';
 import { useGraph } from '../../context/GraphContext';
 
 type TabType = 'file' | 'url' | 'text';
 
 export const SourceIngestionDrawer: React.FC = () => {
-  const { isSourceDrawerOpen, setIsSourceDrawerOpen, setNodes } = useGraph();
+  const { 
+    isSourceDrawerOpen, 
+    setIsSourceDrawerOpen, 
+    setNodes, 
+    selectedNodeId, 
+    selectedNode,
+    addEdge 
+  } = useGraph();
   
   const [activeTab, setActiveTab] = useState<TabType>('file');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [urlInput, setUrlInput] = useState<string>('');
   const [rawTextInput, setRawTextInput] = useState<string>('');
   const [keyConceptExtraction, setKeyConceptExtraction] = useState<boolean>(true);
+  const [autoConnect, setAutoConnect] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
@@ -80,6 +89,10 @@ export const SourceIngestionDrawer: React.FC = () => {
         ? selectedFile.name.replace(/\.[^/.]+$/, "") 
         : urlInput ? 'Web/DOI Source' : 'Raw Text Entry';
 
+      // Spawn node near current selected node position if available
+      const spawnX = selectedNode ? selectedNode.x + 260 : 250;
+      const spawnY = selectedNode ? selectedNode.y + 40 : 180;
+
       setNodes((prevNodes: any[]) => [
         ...prevNodes,
         {
@@ -88,9 +101,17 @@ export const SourceIngestionDrawer: React.FC = () => {
           category: 'SOURCE',
           description: `Imported via ${activeTab.toUpperCase()} ingestion engine.`,
           tags: ['#imported', '#source'],
-          status: 'Verified'
+          status: 'Verified',
+          x: spawnX,
+          y: spawnY,
+          badge: 'SOURCE'
         }
       ]);
+
+      // Connect automatically to active node if enabled
+      if (autoConnect && selectedNodeId) {
+        addEdge(newNodeId, selectedNodeId, 'references');
+      }
 
       setIsProcessing(false);
       handleClose();
@@ -123,6 +144,19 @@ export const SourceIngestionDrawer: React.FC = () => {
         {/* Content Body */}
         <div className="p-5 flex-1 overflow-y-auto flex flex-col gap-6">
           
+          {/* Active Target Banner */}
+          {selectedNode && (
+            <div className="p-3 bg-cyan-950/30 border border-cyan-500/20 rounded-xl flex items-center gap-3">
+              <div className="w-7 h-7 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+                <GitCommit className="w-4 h-4" />
+              </div>
+              <div className="overflow-hidden">
+                <p className="text-[10px] font-mono text-cyan-400 uppercase tracking-wider font-semibold">Active Target Node</p>
+                <p className="text-xs font-semibold text-slate-200 truncate">{selectedNode.title}</p>
+              </div>
+            </div>
+          )}
+
           {/* Navigation Tabs */}
           <div className="grid grid-cols-3 gap-1 p-1 bg-[#12151E] border border-slate-800 rounded-lg text-xs font-medium">
             <button
@@ -246,7 +280,7 @@ export const SourceIngestionDrawer: React.FC = () => {
                 value={rawTextInput}
                 onChange={(e) => setRawTextInput(e.target.value)}
                 placeholder="Paste abstract, study excerpts, or raw notes..."
-                rows={6}
+                rows={5}
                 className="w-full p-3 rounded-lg bg-[#12151E] border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 resize-none"
               />
             </div>
@@ -257,6 +291,8 @@ export const SourceIngestionDrawer: React.FC = () => {
             <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold">
               EXTRACTION SETTINGS
             </span>
+
+            {/* Concept Extraction */}
             <div className="p-3 bg-[#12151E] border border-slate-800/80 rounded-xl flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-lg bg-indigo-950/60 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
@@ -264,7 +300,7 @@ export const SourceIngestionDrawer: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs font-medium text-slate-200">Key Concept Extraction</p>
-                  <p className="text-[10px] text-slate-400">Auto-identify and create nodes for key terms</p>
+                  <p className="text-[10px] text-slate-400">Auto-identify terms from content</p>
                 </div>
               </div>
               <button
@@ -277,6 +313,35 @@ export const SourceIngestionDrawer: React.FC = () => {
                 <div
                   className={`w-4 h-4 rounded-full bg-slate-950 transition-transform ${
                     keyConceptExtraction ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Auto-Connect toggle */}
+            <div className="p-3 bg-[#12151E] border border-slate-800/80 rounded-xl flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-teal-950/60 border border-teal-500/30 flex items-center justify-center text-teal-400">
+                  <GitCommit className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-slate-200">Connect to Active Node</p>
+                  <p className="text-[10px] text-slate-400">
+                    {selectedNode ? `Link edge directly to ${selectedNode.title}` : 'No active target node selected'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={!selectedNodeId}
+                onClick={() => setAutoConnect(!autoConnect)}
+                className={`w-9 h-5 rounded-full transition-colors relative flex items-center px-0.5 ${
+                  autoConnect && selectedNodeId ? 'bg-cyan-500' : 'bg-slate-700 opacity-60'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-slate-950 transition-transform ${
+                    autoConnect && selectedNodeId ? 'translate-x-4' : 'translate-x-0'
                   }`}
                 />
               </button>
@@ -303,7 +368,7 @@ export const SourceIngestionDrawer: React.FC = () => {
             ) : (
               <>
                 <Check className="w-4 h-4" />
-                <span>Process & Generate Graph Nodes</span>
+                <span>Process & Link Source Node</span>
               </>
             )}
           </button>
