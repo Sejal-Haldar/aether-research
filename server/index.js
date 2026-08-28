@@ -207,7 +207,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
     const pdfBase64 = req.file.buffer.toString('base64');
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       contents: [
         {
           inlineData: {
