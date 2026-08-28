@@ -6,7 +6,8 @@ import {
   Layers, 
   BookOpen, 
   ShieldCheck, 
-  Trash2
+  Trash2,
+  Edit3
 } from 'lucide-react';
 import { useGraph } from '../../context/GraphContext';
 import { MechanicsList } from './MechanicsList';
@@ -16,6 +17,7 @@ export const InspectorPanel: React.FC = () => {
   const { 
     selectedNode, 
     setIsAddNoteModalOpen, 
+    openNodeEditor,
     deleteNode, 
     setSelectedNodeId, 
     fitToView,
@@ -33,7 +35,7 @@ export const InspectorPanel: React.FC = () => {
           <div>
             <h3 className="text-sm font-semibold text-slate-300">No Concept Selected</h3>
             <p className="text-xs text-slate-500 mt-1 max-w-[200px] leading-relaxed">
-              Click any node in the graph viewport to inspect its architectural specs, mechanics, and citations.
+              Click any node in the graph viewport to inspect its architectural specs, mechanics, and citations. Double-click to edit.
             </p>
           </div>
           <button
@@ -76,20 +78,30 @@ export const InspectorPanel: React.FC = () => {
     <aside className="w-80 bg-[#0D0F14] border-l border-slate-800/80 flex flex-col justify-between p-5 z-20 flex-shrink-0 overflow-y-auto custom-scrollbar select-none">
       {/* Top Header Section */}
       <div className="flex flex-col gap-5">
-        {/* Category Badge & Status */}
+        {/* Category Badge & Actions */}
         <div className="flex items-center justify-between">
           <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase tracking-wider border ${getCategoryBadgeClass(selectedNode.category)}`}>
             {selectedNode.badge || `${selectedNode.category} NODE`}
           </span>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 rounded">
               <ShieldCheck className="w-2.5 h-2.5" />
               {selectedNode.status || 'Verified'}
             </span>
+
+            {/* Quick Edit Node Button */}
+            <button
+              onClick={() => openNodeEditor(selectedNode.id)}
+              className="text-slate-400 hover:text-cyan-400 p-1 rounded hover:bg-slate-800 transition-colors"
+              title="Edit Node (or double-click node on canvas)"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
+
             <button
               onClick={() => deleteNode(selectedNode.id)}
-              className="text-slate-500 hover:text-rose-400 p-1 transition-colors"
+              className="text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-slate-800 transition-colors"
               title="Delete node from graph"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -109,7 +121,7 @@ export const InspectorPanel: React.FC = () => {
                 key={tag}
                 className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-slate-800/80 text-cyan-400/90 border border-slate-700/60"
               >
-                {tag}
+                #{tag}
               </span>
             ))}
           </div>
@@ -138,6 +150,11 @@ export const InspectorPanel: React.FC = () => {
             <p className="text-[11px] text-slate-400 font-mono">
               {selectedNode.source.citation}
             </p>
+            {(selectedNode.doi || selectedNode.source.doi) && (
+              <p className="text-[10px] text-cyan-400/80 font-mono">
+                DOI: {selectedNode.doi || selectedNode.source.doi}
+              </p>
+            )}
             {selectedNode.source.url && (
               <a
                 href={selectedNode.source.url}

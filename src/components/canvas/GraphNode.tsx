@@ -15,6 +15,7 @@ interface GraphNodeProps {
   isMatchedSearch: boolean;
   isDimmed: boolean;
   onSelect: (nodeId: string) => void;
+  onDoubleClick: (nodeId: string) => void;
   onDragStart: (nodeId: string, nodeX: number, nodeY: number, e: React.MouseEvent) => void;
 }
 
@@ -24,6 +25,7 @@ export const GraphNode: React.FC<GraphNodeProps> = ({
   isMatchedSearch,
   isDimmed,
   onSelect,
+  onDoubleClick,
   onDragStart
 }) => {
   const getCategoryStyles = (category: string) => {
@@ -77,6 +79,11 @@ export const GraphNode: React.FC<GraphNodeProps> = ({
         e.stopPropagation();
         onSelect(node.id);
       }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onDoubleClick(node.id);
+      }}
+      title="Double-click to edit node"
       className={`graph-node absolute top-0 left-0 w-64 rounded-xl cursor-pointer transition-shadow select-none ${
         isDimmed ? 'opacity-30 filter grayscale' : 'opacity-100'
       } ${

@@ -11,6 +11,7 @@ export const GraphCanvas: React.FC = () => {
     edges,
     selectedNodeId,
     setSelectedNodeId,
+    openNodeEditor,
     updateNodePosition,
     searchQuery,
     categoryFilter,
@@ -172,6 +173,7 @@ export const GraphCanvas: React.FC = () => {
                 isMatchedSearch={isMatchedSearch}
                 isDimmed={isDimmed}
                 onSelect={(id) => setSelectedNodeId(id)}
+                onDoubleClick={(id) => openNodeEditor(id)}
                 onDragStart={handleNodeDragStart}
               />
             );

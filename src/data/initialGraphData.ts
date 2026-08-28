@@ -35,17 +35,20 @@ export const INITIAL_NODES: GraphNodeData[] = [
     id: 'node-bert',
     title: 'BERT',
     category: 'MODEL',
+    categories: ['Model', 'Algorithm'],
     badge: 'MODEL',
     description: 'Bidirectional Encoder Representations from Transformers pre-trained on deep bidirectional representations from unlabeled text.',
-    tags: ['NLP', 'TRANSFORMER', 'PRE-TRAINED', 'BIDIRECTIONAL'],
+    tags: ['attention', 'nlp', 'encoder', 'transformer'],
     x: 80,
     y: 112, // top-28 (7rem = 112px), left-20 (5rem = 80px)
     glow: false,
     status: 'Verified',
+    doi: '10.48550/arXiv.1810.04805',
     source: {
       title: 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding',
       citation: 'Devlin et al., 2018 (Google AI Language)',
       url: 'https://arxiv.org/abs/1810.04805',
+      doi: '10.48550/arXiv.1810.04805',
       year: 2018
     },
     mechanics: [
@@ -62,6 +65,7 @@ export const INITIAL_NODES: GraphNodeData[] = [
     ],
     complexityMatrix: {
       timeComplexity: 'O(n · d² + n² · d)',
+      spaceComplexity: 'O(n · d + n²)',
       parallelizable: 'High',
       parameters: '110M (Base) / 340M (Large)',
       type: 'Encoder-Only',
@@ -80,17 +84,20 @@ export const INITIAL_NODES: GraphNodeData[] = [
     id: 'node-transformers',
     title: 'Transformers',
     category: 'ARCHITECTURE',
+    categories: ['Architecture', 'Deep Learning'],
     badge: 'ARCHITECTURE',
     description: 'A deep learning architecture relying entirely on an attention mechanism to draw global dependencies between input and output without recurrent layers.',
-    tags: ['NLP', 'DEEP LEARNING', 'ATTENTION', 'FOUNDATION'],
+    tags: ['nlp', 'deep-learning', 'attention', 'foundation'],
     x: 360,
     y: 112, // top-28 (112px), left-80 (20rem = 320-360px)
     glow: true,
     status: 'Verified',
+    doi: '10.48550/arXiv.1706.03762',
     source: {
       title: 'Attention Is All You Need',
       citation: 'Vaswani et al., 2017 (Google Brain & Google Research)',
       url: 'https://arxiv.org/abs/1706.03762',
+      doi: '10.48550/arXiv.1706.03762',
       year: 2017
     },
     mechanics: [
@@ -109,6 +116,7 @@ export const INITIAL_NODES: GraphNodeData[] = [
     ],
     complexityMatrix: {
       timeComplexity: 'O(n² · d)',
+      spaceComplexity: 'O(n²)',
       parallelizable: 'High',
       parameters: '65M - 175B+',
       type: 'Sequence-to-Sequence',
@@ -133,17 +141,20 @@ export const INITIAL_NODES: GraphNodeData[] = [
     id: 'node-self-attention',
     title: 'Self-Attention',
     category: 'MECHANISM',
+    categories: ['Mechanism', 'Operator'],
     badge: 'MECHANISM',
     description: 'Contextual weighting mechanism for parallelized representations mapping Query, Key, and Value matrices into compatibility scores.',
-    tags: ['MECHANISM', 'MATRIX-OP', 'SCALED-DOT-PRODUCT'],
+    tags: ['mechanism', 'matrix-op', 'scaled-dot-product'],
     x: 360,
     y: 360, // top-80 (20rem = 320-360px), left-80
     glow: false,
     status: 'Verified',
+    doi: '10.48550/arXiv.1706.03762.3.2',
     source: {
       title: 'Attention Is All You Need (Section 3.2)',
       citation: 'Vaswani et al., 2017',
       url: 'https://arxiv.org/abs/1706.03762',
+      doi: '10.48550/arXiv.1706.03762',
       year: 2017
     },
     mechanics: [
@@ -160,6 +171,7 @@ export const INITIAL_NODES: GraphNodeData[] = [
     ],
     complexityMatrix: {
       timeComplexity: 'O(n² · d)',
+      spaceComplexity: 'O(n²)',
       parallelizable: 'High',
       parameters: 'Linear in projection weights',
       type: 'Core Operator',
@@ -178,17 +190,20 @@ export const INITIAL_NODES: GraphNodeData[] = [
     id: 'node-positional-encoding',
     title: 'Positional Encoding',
     category: 'MECHANISM',
+    categories: ['Mechanism', 'Embedding'],
     badge: 'MECHANISM',
     description: 'Sinusoidal and rotary position embeddings injected into input vectors to preserve permutation order without recurrence.',
-    tags: ['EMBEDDING', 'POSITION', 'ROPE'],
+    tags: ['embedding', 'position', 'rope'],
     x: 650,
     y: 112,
     glow: false,
     status: 'Verified',
+    doi: '10.48550/arXiv.2104.09864',
     source: {
       title: 'RoFormer: Enhanced Transformer with Rotary Position Embedding',
       citation: 'Su et al., 2021',
       url: 'https://arxiv.org/abs/2104.09864',
+      doi: '10.48550/arXiv.2104.09864',
       year: 2021
     },
     mechanics: [
@@ -205,6 +220,7 @@ export const INITIAL_NODES: GraphNodeData[] = [
     ],
     complexityMatrix: {
       timeComplexity: 'O(n · d)',
+      spaceComplexity: 'O(1)',
       parallelizable: 'High',
       parameters: '0 (Fixed) or O(max_len · d)',
       type: 'Input Modifier',
@@ -216,17 +232,20 @@ export const INITIAL_NODES: GraphNodeData[] = [
     id: 'node-roberta',
     title: 'RoBERTa',
     category: 'MODEL',
+    categories: ['Model', 'Optimization'],
     badge: 'MODEL',
     description: 'A Robustly Optimized BERT Pretraining Approach demonstrating that hyperparameter tuning and longer training dramatically improves performance.',
-    tags: ['NLP', 'OPTIMIZED-BERT', 'DYNAMIC-MASKING'],
+    tags: ['nlp', 'optimized-bert', 'dynamic-masking'],
     x: 80,
     y: 360,
     glow: false,
     status: 'Experimental',
+    doi: '10.48550/arXiv.1907.11692',
     source: {
       title: 'RoBERTa: A Robustly Optimized BERT Pretraining Approach',
       citation: 'Liu et al., 2019 (Meta AI)',
       url: 'https://arxiv.org/abs/1907.11692',
+      doi: '10.48550/arXiv.1907.11692',
       year: 2019
     },
     mechanics: [
@@ -238,6 +257,7 @@ export const INITIAL_NODES: GraphNodeData[] = [
     ],
     complexityMatrix: {
       timeComplexity: 'O(n · d² + n² · d)',
+      spaceComplexity: 'O(n · d + n²)',
       parallelizable: 'High',
       parameters: '125M / 355M',
       type: 'Encoder-Only',

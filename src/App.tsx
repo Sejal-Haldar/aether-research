@@ -10,6 +10,7 @@ import { AddNodeModal } from './components/modals/AddNodeModal';
 import { NewWorkspaceModal } from './components/modals/NewWorkspaceModal';
 import { CommandPalette } from './components/modals/CommandPalette';
 import { AddNoteModal } from './components/modals/AddNoteModal';
+import { NodeEditorModal } from './components/modals/NodeEditorModal';
 
 const AppContent: React.FC = () => {
   const {
@@ -62,6 +63,7 @@ const AppContent: React.FC = () => {
       <NewWorkspaceModal />
       <CommandPalette />
       <AddNoteModal />
+      <NodeEditorModal />
     </div>
   );
 };

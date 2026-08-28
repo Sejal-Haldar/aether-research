@@ -19,6 +19,9 @@ interface GraphContextType {
   isNewWorkspaceModalOpen: boolean;
   isAddNoteModalOpen: boolean;
   isInsightsDrawerOpen: boolean;
+  isNodeEditorModalOpen: boolean;
+  editingNodeId: string | null;
+  editingNode: GraphNodeData | undefined;
   showGrid: boolean;
   layoutMode: 'free' | 'hierarchical' | 'radial';
   activeNavTab: string;
@@ -27,6 +30,7 @@ interface GraphContextType {
   setSelectedNodeId: (id: string | null) => void;
   updateNodePosition: (id: string, x: number, y: number) => void;
   addNode: (node: Partial<GraphNodeData> & { title: string; category: NodeCategory; description: string; connectToNodeId?: string; edgeLabel?: string }) => string;
+  updateNode: (id: string, updatedData: Partial<GraphNodeData>, updatedConnections?: { id?: string; targetId: string; label: string }[]) => void;
   deleteNode: (id: string) => void;
   addEdge: (sourceId: string, targetId: string, label?: string) => void;
   deleteEdge: (id: string) => void;
@@ -44,6 +48,8 @@ interface GraphContextType {
   setIsNewWorkspaceModalOpen: (open: boolean) => void;
   setIsAddNoteModalOpen: (open: boolean) => void;
   setIsInsightsDrawerOpen: (open: boolean) => void;
+  openNodeEditor: (nodeId: string) => void;
+  closeNodeEditor: () => void;
   setShowGrid: (show: boolean) => void;
   setActiveNavTab: (tab: string) => void;
   switchWorkspace: (workspaceId: string) => void;
@@ -80,6 +86,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isNewWorkspaceModalOpen, setIsNewWorkspaceModalOpen] = useState<boolean>(false);
   const [isAddNoteModalOpen, setIsAddNoteModalOpen] = useState<boolean>(false);
   const [isInsightsDrawerOpen, setIsInsightsDrawerOpen] = useState<boolean>(false);
+  const [isNodeEditorModalOpen, setIsNodeEditorModalOpen] = useState<boolean>(false);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
   const activeWorkspace = useMemo(() => {
     return workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
@@ -88,6 +96,21 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const selectedNode = useMemo(() => {
     return nodes.find(n => n.id === selectedNodeId);
   }, [nodes, selectedNodeId]);
+
+  const editingNode = useMemo(() => {
+    return nodes.find(n => n.id === editingNodeId);
+  }, [nodes, editingNodeId]);
+
+  const openNodeEditor = useCallback((nodeId: string) => {
+    setEditingNodeId(nodeId);
+    setSelectedNodeId(nodeId);
+    setIsNodeEditorModalOpen(true);
+  }, []);
+
+  const closeNodeEditor = useCallback(() => {
+    setIsNodeEditorModalOpen(false);
+    setEditingNodeId(null);
+  }, []);
 
   // Node position updater
   const updateNodePosition = useCallback((id: string, x: number, y: number) => {
@@ -101,6 +124,7 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: newId,
       title: data.title,
       category: data.category,
+      categories: data.categories || [data.category],
       badge: data.badge || data.category,
       description: data.description,
       tags: data.tags || ['RESEARCH', data.category],
@@ -108,10 +132,12 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       y: data.y ?? (Math.floor(Math.random() * 200) + 150),
       glow: data.glow ?? false,
       status: data.status || 'Verified',
+      doi: data.doi,
       source: data.source,
       mechanics: data.mechanics || [],
       complexityMatrix: data.complexityMatrix || {
         timeComplexity: 'O(n · d)',
+        spaceComplexity: 'O(n)',
         parallelizable: 'High',
         parameters: 'Dynamic',
         type: 'Modular Block'
@@ -138,6 +164,54 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return newId;
   }, []);
 
+  // Update Node & its connections
+  const updateNode = useCallback((
+    id: string, 
+    updatedData: Partial<GraphNodeData>, 
+    updatedConnections?: { id?: string; targetId: string; label: string }[]
+  ) => {
+    setNodes(prev => prev.map(node => {
+      if (node.id === id) {
+        return {
+          ...node,
+          ...updatedData,
+          complexityMatrix: {
+            ...node.complexityMatrix,
+            ...updatedData.complexityMatrix
+          },
+          source: {
+            ...node.source,
+            ...updatedData.source,
+            title: updatedData.source?.title || node.source?.title || '',
+            citation: updatedData.source?.citation || node.source?.citation || '',
+            doi: updatedData.doi || node.source?.doi || ''
+          }
+        };
+      }
+      return node;
+    }));
+
+    // Update edges if provided
+    if (updatedConnections) {
+      setEdges(prevEdges => {
+        // Remove existing edges where this node is source
+        const otherEdges = prevEdges.filter(e => e.source !== id);
+        
+        // Construct new outgoing edges
+        const newEdges: GraphEdgeData[] = updatedConnections.map((conn, idx) => ({
+          id: conn.id || `edge-${id}-${conn.targetId}-${Date.now()}-${idx}`,
+          source: id,
+          target: conn.targetId,
+          label: conn.label,
+          type: 'solid',
+          active: true
+        }));
+
+        return [...otherEdges, ...newEdges];
+      });
+    }
+  }, []);
+
   // Delete Node
   const deleteNode = useCallback((id: string) => {
     setNodes(prev => prev.filter(n => n.id !== id));
@@ -145,7 +219,10 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (selectedNodeId === id) {
       setSelectedNodeId(null);
     }
-  }, [selectedNodeId]);
+    if (editingNodeId === id) {
+      closeNodeEditor();
+    }
+  }, [selectedNodeId, editingNodeId, closeNodeEditor]);
 
   // Add Edge
   const addEdge = useCallback((sourceId: string, targetId: string, label: string = 'connects_to') => {
@@ -355,12 +432,16 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isNewWorkspaceModalOpen,
         isAddNoteModalOpen,
         isInsightsDrawerOpen,
+        isNodeEditorModalOpen,
+        editingNodeId,
+        editingNode,
         showGrid,
         layoutMode,
         activeNavTab,
         setSelectedNodeId,
         updateNodePosition,
         addNode,
+        updateNode,
         deleteNode,
         addEdge,
         deleteEdge,
@@ -378,6 +459,8 @@ export const GraphProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsNewWorkspaceModalOpen,
         setIsAddNoteModalOpen,
         setIsInsightsDrawerOpen,
+        openNodeEditor,
+        closeNodeEditor,
         setShowGrid,
         setActiveNavTab,
         switchWorkspace,

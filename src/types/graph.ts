@@ -4,6 +4,7 @@ export interface GraphNodeData {
   id: string;
   title: string;
   category: NodeCategory;
+  categories?: string[];
   description: string;
   tags: string[];
   x: number;
@@ -11,11 +12,13 @@ export interface GraphNodeData {
   badge?: string;
   glow?: boolean;
   status?: 'Verified' | 'Experimental' | 'Draft' | 'Deprecated';
+  doi?: string;
   source?: {
     title: string;
     citation: string;
     url?: string;
     year?: number;
+    doi?: string;
   };
   mechanics?: {
     id: string;
@@ -25,6 +28,7 @@ export interface GraphNodeData {
   }[];
   complexityMatrix?: {
     timeComplexity?: string;
+    spaceComplexity?: string;
     parallelizable?: 'High' | 'Medium' | 'Low';
     parameters?: string;
     type?: string;
