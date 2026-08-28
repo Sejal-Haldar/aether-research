@@ -1,24 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
-import fs from 'fs';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-
-// Bypass pdf-parse ESM debug crash by mocking missing test file read on import
-const originalReadFileSync = fs.readFileSync;
-fs.readFileSync = function (path, ...args) {
-  if (typeof path === 'string' && path.includes('05-versions-space.pdf')) {
-    return Buffer.from('');
-  }
-  return originalReadFileSync.call(fs, path, ...args);
-};
-
-const pdfParseModule = require('pdf-parse');
-fs.readFileSync = originalReadFileSync; // Restore standard file reading
-
-const pdfParse = typeof pdfParseModule === 'function' ? pdfParseModule : (pdfParseModule.default || pdfParseModule);
-
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -181,7 +163,7 @@ app.get('/api/graph-data', (req, res) => {
   res.json({ success: true, nodes: storedNodes });
 });
 
-// --- AI EXTRACTION PIPELINE ENDPOINT ---
+// --- AI EXTRACTION PIPELINE ENDPOINT (NATIVE GEMINI PDF INPUT) ---
 
 app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
   try {
@@ -189,17 +171,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No PDF file provided in request.' });
     }
 
-    // 1. Extract raw text from PDF buffer
-    const pdfData = await pdfParse(req.file.buffer);
-    const text = pdfData.text;
-
-    if (!text || text.trim().length === 0) {
-      return res.status(400).json({ 
-        error: 'Unable to extract text from PDF. The document might be scanned or image-only.' 
-      });
-    }
-
-    // 2. Define structured JSON output schema for Gemini
+    // 1. Define structured JSON output schema for Gemini
     const responseSchema = {
       type: Type.OBJECT,
       properties: {
@@ -208,11 +180,11 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
           items: {
             type: Type.OBJECT,
             properties: {
-              name: { type: Type.STRING, description: "Name of the entity or concept" },
-              type: { type: Type.STRING, description: "Category (e.g., ARCHITECTURE, MODEL, MECHANISM)" },
-              description: { type: Type.STRING, description: "Short description based on text" }
+              name: { type: Type.STRING, description: 'Name of the entity or concept' },
+              type: { type: Type.STRING, description: 'Category (e.g., ARCHITECTURE, MODEL, MECHANISM)' },
+              description: { type: Type.STRING, description: 'Short description based on text' }
             },
-            required: ["name", "type", "description"]
+            required: ['name', 'type', 'description']
           }
         },
         relationships: {
@@ -220,23 +192,31 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
           items: {
             type: Type.OBJECT,
             properties: {
-              source: { type: Type.STRING, description: "Source concept name" },
-              target: { type: Type.STRING, description: "Target concept name" },
-              type: { type: Type.STRING, description: "Relationship predicate (e.g., uses, contains, improves)" }
+              source: { type: Type.STRING, description: 'Source concept name' },
+              target: { type: Type.STRING, description: 'Target concept name' },
+              type: { type: Type.STRING, description: 'Relationship predicate (e.g., uses, contains, improves)' }
             },
-            required: ["source", "target", "type"]
+            required: ['source', 'target', 'type']
           }
         }
       },
-      required: ["concepts", "relationships"]
+      required: ['concepts', 'relationships']
     };
 
-    // 3. Prompt model with extracted text
-    const prompt = `Analyze the following document text and extract key concepts and relationships between them:\n\n${text.substring(0, 35000)}`;
+    // 2. Convert PDF buffer to Base64 and send directly to Gemini 2.5 Flash
+    const pdfBase64 = req.file.buffer.toString('base64');
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: [
+        {
+          inlineData: {
+            mimeType: 'application/pdf',
+            data: pdfBase64
+          }
+        },
+        'Analyze the uploaded document and extract key concepts and relationships between them.'
+      ],
       config: {
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
@@ -246,8 +226,8 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
 
     const graphPayload = JSON.parse(response.text);
 
-    // 4. Format concepts into renderable canvas nodes
-    const formattedNodes = graphPayload.concepts.map((concept, index) => {
+    // 3. Format concepts into renderable canvas nodes
+    const formattedNodes = (graphPayload.concepts || []).map((concept, index) => {
       const slugId = `node-${concept.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const col = index % 3;
       const row = Math.floor(index / 3);
@@ -259,7 +239,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
         categories: [(concept.type || 'CONCEPT').toUpperCase()],
         badge: (concept.type || 'CONCEPT').toUpperCase(),
         description: concept.description,
-        tags: [concept.type.toLowerCase(), 'extracted'],
+        tags: [concept.type ? concept.type.toLowerCase() : 'concept', 'extracted'],
         x: 100 + col * 300,
         y: 100 + row * 240,
         glow: index === 0,
@@ -275,8 +255,8 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       };
     });
 
-    // 5. Format relationships into renderable edges
-    const formattedEdges = graphPayload.relationships.map((rel, index) => {
+    // 4. Format relationships into renderable edges
+    const formattedEdges = (graphPayload.relationships || []).map((rel, index) => {
       const sourceId = `node-${rel.source.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const targetId = `node-${rel.target.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
@@ -288,10 +268,10 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       };
     });
 
-    // 6. Save new nodes into memory storage
+    // 5. Save new nodes into memory storage
     storedNodes = [...storedNodes, ...formattedNodes];
 
-    // 7. Send formatted nodes and edges to frontend
+    // 6. Send formatted nodes and edges to frontend
     res.json({
       success: true,
       nodes: formattedNodes,
