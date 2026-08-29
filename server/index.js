@@ -1,9 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -16,10 +13,10 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Multer disk storage writes uploads directly to disk to avoid server RAM overhead on large files
+// Memory storage keeps buffer in memory for direct Gemini inline base64 processing
 const upload = multer({
-  dest: os.tmpdir(),
-  limits: { fileSize: 100 * 1024 * 1024 } // 100MB max file size limit
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB file size limit
 });
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -170,62 +167,55 @@ app.get('/api/graph-data', (req, res) => {
   res.json({ success: true, nodes: storedNodes });
 });
 
-// --- EXTRACTION PIPELINE (LARGE FILES & URL SUPPORT) ---
+// --- EXTRACTION PIPELINE (ROBUST PDF BUFFER & LINK PROCESSING) ---
 
 app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
-  let tempFilePath = null;
-  let uploadedFile = null;
-
   try {
     let contentsPayload = [];
 
-    // Case 1: PDF File Upload (Large or Small)
+    // Case 1: Uploaded PDF File (Small or Large)
     if (req.file) {
-      uploadedFile = await ai.files.upload({
-        file: req.file.path,
-        config: { mimeType: req.file.mimetype || 'application/pdf' }
-      });
+      const mimeType = req.file.mimetype || 'application/pdf';
+      const base64Data = req.file.buffer.toString('base64');
 
       contentsPayload = [
         {
-          fileData: {
-            fileUri: uploadedFile.uri,
-            mimeType: uploadedFile.mimeType
+          inlineData: {
+            mimeType: mimeType,
+            data: base64Data
           }
         },
         'Analyze the uploaded document and extract key concepts and relationships between them.'
       ];
-    } 
-    // Case 2: Web URL or Direct PDF Link
+    }
+    // Case 2: Link Input (Web Page or Direct PDF URL)
     else if (req.body && req.body.url) {
-      const targetUrl = req.body.url;
-      const urlResponse = await fetch(targetUrl);
+      const targetUrl = req.body.url.trim();
+
+      const urlResponse = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
 
       if (!urlResponse.ok) {
-        return res.status(400).json({ error: `Failed to fetch URL: ${urlResponse.statusText}` });
+        return res.status(400).json({ error: `Failed to fetch URL (${urlResponse.status} ${urlResponse.statusText})` });
       }
 
       const contentType = urlResponse.headers.get('content-type') || '';
 
       if (contentType.includes('application/pdf') || targetUrl.toLowerCase().endsWith('.pdf')) {
         const arrayBuffer = await urlResponse.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        tempFilePath = path.join(os.tmpdir(), `link-${Date.now()}.pdf`);
-        fs.writeFileSync(tempFilePath, buffer);
-
-        uploadedFile = await ai.files.upload({
-          file: tempFilePath,
-          config: { mimeType: 'application/pdf' }
-        });
+        const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
         contentsPayload = [
           {
-            fileData: {
-              fileUri: uploadedFile.uri,
-              mimeType: uploadedFile.mimeType
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: base64Data
             }
           },
-          'Analyze the document from the link and extract key concepts and relationships between them.'
+          'Analyze the PDF document from the link and extract key concepts and relationships between them.'
         ];
       } else {
         const textHtml = await urlResponse.text();
@@ -234,17 +224,17 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
           .replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, '')
           .replace(/<[^>]*>?/gm, ' ')
           .replace(/\s+/g, ' ')
-          .slice(0, 40000);
+          .slice(0, 50000);
 
         contentsPayload = [
           `Analyze the following webpage content from ${targetUrl} and extract key concepts and relationships between them:\n\n${cleanText}`
         ];
       }
     } else {
-      return res.status(400).json({ error: 'Please provide either a PDF file or a URL link.' });
+      return res.status(400).json({ error: 'Please upload a PDF file or provide a valid URL link.' });
     }
 
-    // Response Schema Definition
+    // JSON Schema for Gemini 3.6 Flash
     const responseSchema = {
       type: Type.OBJECT,
       properties: {
@@ -276,7 +266,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       required: ['concepts', 'relationships']
     };
 
-    // Gemini 3.6 Flash Call
+    // Execute Gemini 3.6 Flash
     const modelResponse = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
       contents: contentsPayload,
@@ -289,6 +279,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
 
     const graphPayload = JSON.parse(modelResponse.text);
 
+    // Format Nodes
     const formattedNodes = (graphPayload.concepts || []).map((concept, index) => {
       const slugId = `node-${concept.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const col = index % 3;
@@ -317,6 +308,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       };
     });
 
+    // Format Edges
     const formattedEdges = (graphPayload.relationships || []).map((rel, index) => {
       const sourceId = `node-${rel.source.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const targetId = `node-${rel.target.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
@@ -340,17 +332,6 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
   } catch (err) {
     console.error('PDF/URL Extraction Failure:', err);
     res.status(500).json({ error: 'Failed to process input source', details: err.message });
-  } finally {
-    // Disk and Cloud Cleanup
-    if (req.file && fs.existsSync(req.file.path)) {
-      try { fs.unlinkSync(req.file.path); } catch (e) {}
-    }
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try { fs.unlinkSync(tempFilePath); } catch (e) {}
-    }
-    if (uploadedFile && uploadedFile.name) {
-      try { await ai.files.delete({ name: uploadedFile.name }); } catch (e) {}
-    }
   }
 });
 
