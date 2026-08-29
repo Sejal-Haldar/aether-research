@@ -1,3 +1,4 @@
+// Original Graph UI Types
 export type NodeCategory = 'MODEL' | 'ARCHITECTURE' | 'MECHANISM' | 'DATASET' | 'METRIC';
 
 export interface GraphNodeData {
@@ -69,4 +70,62 @@ export interface GraphInsight {
   actionText?: string;
   sourceNodeId?: string;
   targetNodeId?: string;
+}
+
+// Extraction & Analysis Data Types (Ingestion)
+export interface Entity {
+  id?: string;
+  name: string;
+  category?: string;
+  description?: string;
+}
+
+export interface Relationship {
+  sourceId: string;
+  targetId: string;
+  relation: string;
+  description?: string;
+}
+
+export interface FlowchartStep {
+  stepNumber: number;
+  label: string;
+  type: 'start' | 'process' | 'decision' | 'end';
+  nextSteps?: number[];
+}
+
+export interface NoteSection {
+  heading: string;
+  bullets: string[];
+  definitions?: { term: string; definition: string }[];
+  formulasOrConcepts?: string[];
+}
+
+export interface ResearchAnalysisData {
+  title?: string;
+  summary: {
+    short: string;
+    detailed?: string;
+    keyTakeaways?: string[];
+    guidingQuestions?: string[];
+  };
+  entities: Entity[];
+  relationships: Relationship[];
+  flowchart?: FlowchartStep[];
+  notes?: NoteSection[];
+}
+
+export interface NodeData {
+  id: string;
+  label: string;
+  category?: string;
+  description?: string;
+  isRoot?: boolean;
+}
+
+export interface EdgeData {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
 }

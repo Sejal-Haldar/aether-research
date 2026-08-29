@@ -11,6 +11,12 @@ import {
   GitCommit
 } from 'lucide-react';
 import { useGraph } from '../../context/GraphContext';
+import { 
+  ResearchAnalysisData, 
+  GraphNodeData, 
+  NodeCategory 
+} from '../../types/graph';
+import { buildResearchGraph } from '../../utils/graphbuilder';
 
 type TabType = 'file' | 'url' | 'text';
 
@@ -99,37 +105,77 @@ export const SourceIngestionDrawer: React.FC = () => {
           throw new Error(`Extraction failed: ${response.statusText}`);
         }
 
-        const data = await response.json();
+        const data: { 
+          success: boolean; 
+          data?: ResearchAnalysisData; 
+          nodes?: GraphNodeData[]; 
+          edges?: { source: string; target: string; label: string }[] 
+        } = await response.json();
 
-        if (data.success && data.nodes) {
-          // Append extracted nodes to visual canvas
-          setNodes((prevNodes: any[]) => [...prevNodes, ...data.nodes]);
+        if (data.success) {
+          let newNodes: GraphNodeData[] = [];
+          let newEdges: { source: string; target: string; label: string }[] = [];
 
-          // Append extracted edges using addEdge from context
-          if (data.edges && data.edges.length > 0) {
-            data.edges.forEach((edge: any) => {
-              addEdge(edge.source, edge.target, edge.label);
+          const baseX = selectedNode ? selectedNode.x + 300 : 250;
+          const baseY = selectedNode ? selectedNode.y : 180;
+          const validCategories: NodeCategory[] = ['MODEL', 'ARCHITECTURE', 'MECHANISM', 'DATASET', 'METRIC'];
+
+          if (data.data) {
+            // Call existing buildResearchGraph utility
+            const { nodes: rawNodes, edges: rawEdges } = buildResearchGraph(
+              selectedFile.name.replace(/[^a-zA-Z0-9]/g, '-'),
+              selectedFile.name,
+              data.data
+            );
+
+            // Adapt NodeData -> GraphNodeData for UI/Canvas state
+            newNodes = rawNodes.map((node, index) => {
+              const rawCat = (node.category?.toUpperCase() || 'MECHANISM') as NodeCategory;
+              const category = validCategories.includes(rawCat) ? rawCat : 'MECHANISM';
+
+              return {
+                id: node.id,
+                title: (node as any).label || (node as any).title || (node as any).name || '',
+                category,
+                description: node.description || '',
+                tags: [node.category || 'extracted'],
+                status: 'Verified',
+                x: baseX + (index % 3) * 260,
+                y: baseY + Math.floor(index / 3) * 160,
+                badge: category
+              };
             });
+
+            newEdges = rawEdges;
+          } else if (data.nodes) {
+            newNodes = data.nodes;
+            newEdges = data.edges || [];
           }
 
-          // Auto connect first extracted concept node to active node if selected
-          if (autoConnect && selectedNodeId && data.nodes.length > 0) {
-            addEdge(data.nodes[0].id, selectedNodeId, 'references');
+          if (newNodes.length > 0) {
+            setNodes((prevNodes: GraphNodeData[]) => [...prevNodes, ...newNodes]);
+
+            newEdges.forEach((edge) => {
+              addEdge(edge.source, edge.target, edge.label);
+            });
+
+            if (autoConnect && selectedNodeId) {
+              addEdge(newNodes[0].id, selectedNodeId, 'references');
+            }
           }
         }
       } else {
-        // Fallback for raw text/URL ingestion
         const newNodeId = `node-${Date.now()}`;
         const title = urlInput ? 'Web/DOI Source' : 'Raw Text Entry';
         const spawnX = selectedNode ? selectedNode.x + 260 : 250;
         const spawnY = selectedNode ? selectedNode.y + 40 : 180;
 
-        setNodes((prevNodes: any[]) => [
+        setNodes((prevNodes: GraphNodeData[]) => [
           ...prevNodes,
           {
             id: newNodeId,
             title: title,
-            category: 'SOURCE',
+            category: 'MECHANISM',
             description: `Imported via ${activeTab.toUpperCase()} ingestion engine.`,
             tags: ['#imported', '#source'],
             status: 'Verified',
@@ -145,7 +191,7 @@ export const SourceIngestionDrawer: React.FC = () => {
       }
     } catch (error) {
       console.error('Error extracting knowledge graph:', error);
-      alert('Failed to extract graph from PDF. Please check server logs.');
+      alert('Failed to extract graph from source. Please check server logs.');
     } finally {
       setIsProcessing(false);
       handleClose();
@@ -404,7 +450,7 @@ export const SourceIngestionDrawer: React.FC = () => {
                 <Check className="w-4 h-4" />
                 <span>Process & Link Source Node</span>
               </>
-            ) }
+            )}
           </button>
           
           <button
