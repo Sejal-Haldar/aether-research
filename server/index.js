@@ -20,12 +20,12 @@ const upload = multer({
 
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
-  console.error('[CRITICAL] GEMINI_API_KEY environment variable is not defined!');
+  console.warn('[WARNING] GEMINI_API_KEY environment variable is missing!');
 }
 
 const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
-// Default baseline node
+// Baseline initial nodes
 const initialNodes = [
   {
     id: 'node-transformers',
@@ -43,7 +43,7 @@ const initialNodes = [
 
 let storedNodes = [...initialNodes];
 
-// System prompt instructing Gemini to extract nodes and direct edges
+// System Prompt
 const EXTRACTION_PROMPT = `
 Analyze the provided document or webpage content thoroughly.
 Extract between 8 to 20 key concepts, components, entities, or architectures mentioned in the text.
@@ -82,7 +82,6 @@ const responseSchema = {
   required: ['concepts', 'relationships']
 };
 
-// Helper: Sanitize JSON response text if wrapped in markdown code blocks
 function cleanJsonResponse(rawText) {
   let cleaned = rawText.trim();
   if (cleaned.startsWith('```json')) {
@@ -93,14 +92,14 @@ function cleanJsonResponse(rawText) {
   return cleaned;
 }
 
-// Helper: Model Fallback Sequence
+// Fixed Model Fallback Sequence
 async function callGeminiWithFallback(contentsPayload) {
-  const candidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+  const candidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
   let lastError = null;
 
   for (const model of candidateModels) {
     try {
-      console.log(`[Gemini API] Requesting extraction using model: ${model}`);
+      console.log(`[Gemini API] Executing extraction with model: ${model}`);
       const response = await ai.models.generateContent({
         model,
         contents: contentsPayload,
@@ -114,40 +113,48 @@ async function callGeminiWithFallback(contentsPayload) {
         return response.text;
       }
     } catch (err) {
-      console.warn(`[Gemini API] Model ${model} execution error: ${err.message}`);
+      console.warn(`[Gemini API] Model ${model} error: ${err.message}`);
       lastError = err;
     }
   }
   throw lastError || new Error('All Gemini candidate models failed to generate content.');
 }
 
-// --- REST API ENDPOINTS ---
+// --- API ENDPOINTS ---
 
 app.get('/api/nodes', (req, res) => res.json(storedNodes));
 
 app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
+  // Check API Key explicitly
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ 
+      error: 'GEMINI_API_KEY environment variable is missing on backend server.' 
+    });
+  }
+
   try {
     let contentsPayload = [];
 
-    // 1. File Input Handling (Native Vision Multimodal Base64)
+    // 1. File Upload Processing
     if (req.file) {
-      console.log(`[Pipeline] Processing uploaded file: ${req.file.originalname} (${req.file.size} bytes)`);
+      console.log(`[Pipeline] Uploading file: ${req.file.originalname} (${req.file.size} bytes)`);
       const base64Data = req.file.buffer.toString('base64');
-      
+      const mimeType = req.file.mimetype || 'application/pdf';
+
       contentsPayload = [
+        { text: EXTRACTION_PROMPT },
         {
           inlineData: {
-            mimeType: req.file.mimetype || 'application/pdf',
+            mimeType: mimeType,
             data: base64Data
           }
-        },
-        { text: EXTRACTION_PROMPT }
+        }
       ];
     } 
-    // 2. URL Input Handling
+    // 2. URL Content Processing
     else if (req.body && req.body.url) {
       const targetUrl = req.body.url.trim();
-      console.log(`[Pipeline] Fetching URL content from: ${targetUrl}`);
+      console.log(`[Pipeline] Fetching URL: ${targetUrl}`);
 
       const urlResponse = await fetch(targetUrl, {
         headers: {
@@ -156,27 +163,25 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       });
 
       if (!urlResponse.ok) {
-        return res.status(400).json({ error: `Failed to fetch target URL (Status ${urlResponse.status}: ${urlResponse.statusText})` });
+        return res.status(400).json({ error: `Failed to fetch URL (${urlResponse.status}: ${urlResponse.statusText})` });
       }
 
       const contentType = urlResponse.headers.get('content-type') || '';
 
       if (contentType.includes('application/pdf') || targetUrl.toLowerCase().endsWith('.pdf')) {
-        console.log('[Pipeline] Content detected as remote PDF document.');
         const arrayBuffer = await urlResponse.arrayBuffer();
         const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
         contentsPayload = [
+          { text: EXTRACTION_PROMPT },
           {
             inlineData: {
               mimeType: 'application/pdf',
               data: base64Data
             }
-          },
-          { text: EXTRACTION_PROMPT }
+          }
         ];
       } else {
-        console.log('[Pipeline] Content detected as HTML webpage.');
         const rawHtml = await urlResponse.text();
         const cleanText = rawHtml
           .replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, '')
@@ -185,26 +190,18 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
           .replace(/\s+/g, ' ')
           .trim();
 
-        if (cleanText.length > 100) {
-          contentsPayload = [
-            { text: `Webpage text from (${targetUrl}):\n\n${cleanText.slice(0, 40000)}\n\n${EXTRACTION_PROMPT}` }
-          ];
-        } else {
-          contentsPayload = [
-            { text: `Target URL Domain: ${targetUrl}. Extract relevant technical architecture, modules, and relationships.\n\n${EXTRACTION_PROMPT}` }
-          ];
-        }
+        contentsPayload = [
+          { text: `Webpage content:\n\n${cleanText.slice(0, 40000)}\n\n${EXTRACTION_PROMPT}` }
+        ];
       }
     } else {
-      return res.status(400).json({ error: 'Please supply a PDF file or a valid URL.' });
+      return res.status(400).json({ error: 'Please supply a PDF file or URL.' });
     }
 
-    // Call Gemini API pipeline
     const rawResultText = await callGeminiWithFallback(contentsPayload);
     const cleanedJsonText = cleanJsonResponse(rawResultText);
     const graphPayload = JSON.parse(cleanedJsonText);
 
-    // Format concepts into Graph Nodes
     const formattedNodes = (graphPayload.concepts || []).map((concept, index) => {
       const slugId = `node-${concept.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const col = index % 3;
@@ -233,7 +230,6 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       };
     });
 
-    // Format relationships into Graph Edges
     const formattedEdges = (graphPayload.relationships || []).map((rel, index) => {
       const sourceId = `node-${rel.source.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const targetId = `node-${rel.target.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
@@ -248,8 +244,6 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
 
     storedNodes = [...storedNodes, ...formattedNodes];
 
-    console.log(`[Pipeline] Completed successfully. Formatted ${formattedNodes.length} nodes and ${formattedEdges.length} edges.`);
-
     res.json({
       success: true,
       nodes: formattedNodes,
@@ -257,8 +251,11 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
     });
 
   } catch (err) {
-    console.error('[Pipeline Error Execution Details]:', err);
-    res.status(500).json({ error: 'Graph extraction failed', details: err.message });
+    console.error('[Pipeline Error]:', err);
+    res.status(500).json({ 
+      error: 'Graph extraction failed', 
+      details: err.message || 'Unknown server error' 
+    });
   }
 });
 
