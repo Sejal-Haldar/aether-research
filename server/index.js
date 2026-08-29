@@ -8,14 +8,7 @@ import { createRequire } from 'module';
 dotenv.config();
 
 // pdf-parse is a CommonJS package whose export shape has changed across
-// versions/builds (plain default function in v1, a named PDFParse class in
-// some v2 builds, etc). A static `import pdfParse from 'pdf-parse'` throws
-// SyntaxError at module-load time (killing the whole server) if Node's ESM
-// interop can't find a `default` export matching what it expects. Using
-// createRequire sidesteps that static analysis entirely — we get the raw
-// CommonJS module.exports at runtime and resolve whichever shape is
-// actually there below, instead of the process failing before it even
-// starts.
+// versions/builds. Using createRequire sidesteps static analysis issues.
 const require = createRequire(import.meta.url);
 const pdfParseRaw = require('pdf-parse');
 
@@ -30,7 +23,6 @@ async function extractPdfText(buffer) {
     return pdfParseRaw.pdf(buffer);
   }
   if (pdfParseRaw && typeof pdfParseRaw.PDFParse === 'function') {
-    // v2-style class API: new PDFParse({ data }).getText()
     const parser = new pdfParseRaw.PDFParse({ data: buffer });
     const result = await parser.getText();
     return {
@@ -64,7 +56,7 @@ if (!apiKey) {
 
 const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
-// Baseline initial nodes (kept from original implementation)
+// Baseline initial nodes
 const initialNodes = [
   {
     id: 'node-transformers',
@@ -80,24 +72,9 @@ const initialNodes = [
   }
 ];
 
-// NOTE: this remains an in-memory, process-lifetime "database" as in the
-// original implementation. It resets on server restart and is shared
-// across all requests/users. Swapping this for a real datastore is out of
-// scope for this fix (see final report / remaining limitations) but the
-// CRUD surface below is now at least complete and consistent.
 let storedNodes = [...initialNodes];
-
-// Minimum characters of extractable text before we consider a PDF's text
-// layer usable. Below this we still forward the file to Gemini (which can
-// read PDFs natively/visually) but we flag the extraction as image-only.
 const MIN_EXTRACTABLE_TEXT_LENGTH = 40;
 
-// ---------------------------------------------------------------------------
-// Structured analysis schema — matches ResearchAnalysisData in
-// src/types/graph.ts exactly (field names included), so the frontend's
-// existing buildResearchGraph() utility can consume this response with zero
-// translation layer.
-// ---------------------------------------------------------------------------
 const EXTRACTION_PROMPT = `
 You are a research/document intelligence analyst. Analyze ONLY the document
 content provided below (or attached) — do not use outside knowledge to invent
@@ -108,12 +85,10 @@ Produce:
 - summary.short: a 2-4 sentence summary based ONLY on the provided content.
 - summary.detailed: a longer paragraph summary (omit or leave empty string if the content is too short for this to be meaningful).
 - summary.keyTakeaways: 3-8 concrete key points / facts actually stated in the content.
-- entities: 5-20 important concepts, technologies, people, methods, components, or theories ACTUALLY discussed in the content. Do not invent entities that aren't present. If the content is too short/trivial to support 5, return however many are genuinely supported — never pad with generic filler.
-- relationships: meaningful directed relationships between entities using verbs like causes, depends on, consists of, enables, produces, related to, example of, contrasts with. Use each relationship's "relation" field for the verb phrase, "sourceId" and "targetId" as the exact entity names (case-insensitive match is fine) they connect.
-- flowchart: ONLY if the content describes an actual process, workflow, algorithm, mechanism, or sequence of steps. Each step needs a stepNumber, a label, a type ('start' | 'process' | 'decision' | 'end'), and nextSteps (array of stepNumbers it flows to). If there is no real process described, return an empty array — never fabricate one.
-- notes: structured notes as an array of sections, each with a heading, bullets (facts/explanations that actually appear in the source), and optionally definitions or formulasOrConcepts if the source actually defines terms or presents formulas. Return an empty array if the content doesn't support structured notes.
-
-If the provided content is empty, unreadable, or contains no substantive information, return empty arrays for entities/relationships/flowchart/notes and say so plainly in summary.short. Do not fabricate placeholder content under any circumstances.
+- entities: 5-20 important concepts, technologies, people, methods, components, or theories ACTUALLY discussed in the content.
+- relationships: meaningful directed relationships between entities using verbs like causes, depends on, consists of, enables, produces, related to, example of, contrasts with.
+- flowchart: ONLY if the content describes an actual process, workflow, algorithm, mechanism, or sequence of steps.
+- notes: structured notes as an array of sections, each with a heading, bullets, and optionally definitions or formulasOrConcepts.
 `;
 
 const responseSchema = {
@@ -192,8 +167,6 @@ function cleanJsonResponse(rawText) {
   return cleaned;
 }
 
-// Validates the AI's parsed JSON actually matches the shape we need before
-// we trust it downstream, rather than assuming arbitrary structure parsed ok.
 function validateAnalysis(obj) {
   if (!obj || typeof obj !== 'object') return 'Response was not a JSON object.';
   if (!obj.summary || typeof obj.summary.short !== 'string') return 'Missing summary.short.';
@@ -204,12 +177,12 @@ function validateAnalysis(obj) {
       return 'One or more entities is missing a valid name.';
     }
   }
-  return null; // valid
+  return null;
 }
 
-// Fixed Model Fallback Sequence
+// Updated Model Fallback Sequence with active models
 async function callGeminiWithFallback(contentsPayload) {
-  const candidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+  const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
   let lastError = null;
 
   for (const model of candidateModels) {
@@ -235,20 +208,6 @@ async function callGeminiWithFallback(contentsPayload) {
   throw lastError || new Error('All Gemini candidate models failed to generate content.');
 }
 
-// ---------------------------------------------------------------------------
-// Normalization: PDF bytes / URL / raw text all become a common
-// NormalizedDocument before analysis, per the PDF+URL -> Normalized Document
-// -> Analysis flow.
-// ---------------------------------------------------------------------------
-
-class IngestError extends Error {
-  constructor(stage, message, status = 400) {
-    super(message);
-    this.stage = stage; // 'network' | 'access' | 'extraction' | 'ai' | 'validation'
-    this.status = status;
-  }
-}
-
 async function normalizePdfBuffer(buffer, filenameHint) {
   let parsed;
   try {
@@ -267,7 +226,7 @@ async function normalizePdfBuffer(buffer, filenameHint) {
     text,
     pageCount,
     extractionStatus: isTextLayerUsable ? 'ok' : 'image-only-or-empty',
-    rawBufferBase64: buffer.toString('base64') // kept so we can also give Gemini native PDF vision as a fallback
+    rawBufferBase64: buffer.toString('base64')
   };
 }
 
@@ -284,11 +243,7 @@ async function normalizeUrl(targetUrl) {
   }
 
   if (!urlResponse.ok) {
-    throw new IngestError(
-      'access',
-      `URL responded with ${urlResponse.status} ${urlResponse.statusText}`,
-      400
-    );
+    throw new IngestError('access', `URL responded with ${urlResponse.status} ${urlResponse.statusText}`, 400);
   }
 
   const contentType = urlResponse.headers.get('content-type') || '';
@@ -316,11 +271,7 @@ async function normalizeUrl(targetUrl) {
   const title = titleMatch ? titleMatch[1].trim() : targetUrl;
 
   if (cleanText.length < MIN_EXTRACTABLE_TEXT_LENGTH) {
-    throw new IngestError(
-      'extraction',
-      'The page loaded but no meaningful article/page content could be extracted from it.',
-      422
-    );
+    throw new IngestError('extraction', 'The page loaded but no meaningful article/page content could be extracted.', 422);
   }
 
   return {
@@ -350,8 +301,6 @@ function buildGeminiPayload(doc) {
   const parts = [{ text: `${EXTRACTION_PROMPT}\n\nDocument title (if known): ${doc.title}\n` }];
 
   if (doc.rawBufferBase64) {
-    // PDF: give Gemini native multimodal access to the file itself (covers
-    // scanned/image-only pages) in addition to whatever text layer we found.
     parts.push({
       inlineData: {
         mimeType: 'application/pdf',
@@ -366,6 +315,14 @@ function buildGeminiPayload(doc) {
   }
 
   return parts;
+}
+
+class IngestError extends Error {
+  constructor(stage, message, status = 400) {
+    super(message);
+    this.stage = stage;
+    this.status = status;
+  }
 }
 
 // --- API ENDPOINTS ---
@@ -408,7 +365,6 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
   try {
     let doc;
 
-    // 1. File Upload (PDF or plain text file)
     if (req.file) {
       console.log(`[Pipeline] Uploading file: ${req.file.originalname} (${req.file.size} bytes)`);
       const isPdf = (req.file.mimetype || '').includes('pdf') || req.file.originalname.toLowerCase().endsWith('.pdf');
@@ -418,21 +374,16 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       } else {
         doc = normalizeRawText(req.file.buffer.toString('utf-8'), req.file.originalname);
       }
-    }
-    // 2. URL
-    else if (req.body && req.body.url && req.body.url.trim()) {
+    } else if (req.body && req.body.url && req.body.url.trim()) {
       console.log(`[Pipeline] Fetching URL: ${req.body.url}`);
       doc = await normalizeUrl(req.body.url.trim());
-    }
-    // 3. Raw pasted text
-    else if (req.body && req.body.text && req.body.text.trim()) {
+    } else if (req.body && req.body.text && req.body.text.trim()) {
       console.log('[Pipeline] Ingesting raw pasted text');
       doc = normalizeRawText(req.body.text, req.body.title);
     } else {
       return res.status(400).json({ error: 'Please supply a PDF file, a URL, or pasted text.', stage: 'input' });
     }
 
-    // Do not silently continue on unusable content — surface it now.
     if (doc.sourceType === 'pdf' || doc.sourceType === 'url-pdf') {
       if (doc.extractionStatus !== 'ok') {
         console.warn('[Pipeline] PDF text layer looks empty/image-only; falling back to Gemini vision on raw bytes.');
