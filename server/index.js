@@ -15,12 +15,17 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
 });
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const apiKey = process.env.GEMINI_API_KEY;
+if (!apiKey) {
+  console.error('[CRITICAL] GEMINI_API_KEY environment variable is not defined!');
+}
 
-// Default mock nodes to fall back on if canvas is cleared
+const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+
+// Default baseline node
 const initialNodes = [
   {
     id: 'node-transformers',
@@ -38,14 +43,14 @@ const initialNodes = [
 
 let storedNodes = [...initialNodes];
 
-// System prompt instructing Gemini to build nodes and edges
+// System prompt instructing Gemini to extract nodes and direct edges
 const EXTRACTION_PROMPT = `
-Analyze the provided document or webpage thoroughly.
-Extract at least 8 to 20 key concepts, components, entities, or architectures mentioned in the text.
+Analyze the provided document or webpage content thoroughly.
+Extract between 8 to 20 key concepts, components, entities, or architectures mentioned in the text.
 Create direct directional relationships between related entities.
 `;
 
-// Gemini response schema definition
+// Structured Output Schema
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
@@ -68,7 +73,7 @@ const responseSchema = {
         properties: {
           source: { type: Type.STRING, description: 'Source concept name' },
           target: { type: Type.STRING, description: 'Target concept name' },
-          type: { type: Type.STRING, description: 'Relationship (e.g., uses, contains, enhances)' }
+          type: { type: Type.STRING, description: 'Relationship predicate (e.g., uses, contains, enhances)' }
         },
         required: ['source', 'target', 'type']
       }
@@ -77,14 +82,25 @@ const responseSchema = {
   required: ['concepts', 'relationships']
 };
 
-// Model execution helper with automatic fallback
+// Helper: Sanitize JSON response text if wrapped in markdown code blocks
+function cleanJsonResponse(rawText) {
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+  return cleaned;
+}
+
+// Helper: Model Fallback Sequence
 async function callGeminiWithFallback(contentsPayload) {
-  const candidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const candidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
   let lastError = null;
 
   for (const model of candidateModels) {
     try {
-      console.log(`[Gemini API] Attempting extraction with model: ${model}`);
+      console.log(`[Gemini API] Requesting extraction using model: ${model}`);
       const response = await ai.models.generateContent({
         model,
         contents: contentsPayload,
@@ -98,14 +114,14 @@ async function callGeminiWithFallback(contentsPayload) {
         return response.text;
       }
     } catch (err) {
-      console.warn(`[Gemini API] Model ${model} failed: ${err.message}`);
+      console.warn(`[Gemini API] Model ${model} execution error: ${err.message}`);
       lastError = err;
     }
   }
-  throw lastError || new Error('All Gemini model candidates failed.');
+  throw lastError || new Error('All Gemini candidate models failed to generate content.');
 }
 
-// --- GRAPH ENDPOINTS ---
+// --- REST API ENDPOINTS ---
 
 app.get('/api/nodes', (req, res) => res.json(storedNodes));
 
@@ -113,9 +129,9 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
   try {
     let contentsPayload = [];
 
-    // 1. Handle File Upload (Direct Native Multimodal PDF)
+    // 1. File Input Handling (Native Vision Multimodal Base64)
     if (req.file) {
-      console.log(`[Pipeline] Processing uploaded PDF: ${req.file.originalname} (${req.file.size} bytes)`);
+      console.log(`[Pipeline] Processing uploaded file: ${req.file.originalname} (${req.file.size} bytes)`);
       const base64Data = req.file.buffer.toString('base64');
       
       contentsPayload = [
@@ -125,13 +141,13 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
             data: base64Data
           }
         },
-        EXTRACTION_PROMPT
+        { text: EXTRACTION_PROMPT }
       ];
-    }
-    // 2. Handle URL Link Input
+    } 
+    // 2. URL Input Handling
     else if (req.body && req.body.url) {
       const targetUrl = req.body.url.trim();
-      console.log(`[Pipeline] Fetching URL: ${targetUrl}`);
+      console.log(`[Pipeline] Fetching URL content from: ${targetUrl}`);
 
       const urlResponse = await fetch(targetUrl, {
         headers: {
@@ -140,13 +156,13 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       });
 
       if (!urlResponse.ok) {
-        return res.status(400).json({ error: `Failed to fetch URL (${urlResponse.status} ${urlResponse.statusText})` });
+        return res.status(400).json({ error: `Failed to fetch target URL (Status ${urlResponse.status}: ${urlResponse.statusText})` });
       }
 
       const contentType = urlResponse.headers.get('content-type') || '';
 
       if (contentType.includes('application/pdf') || targetUrl.toLowerCase().endsWith('.pdf')) {
-        console.log('[Pipeline] URL is a PDF document.');
+        console.log('[Pipeline] Content detected as remote PDF document.');
         const arrayBuffer = await urlResponse.arrayBuffer();
         const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
@@ -157,10 +173,10 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
               data: base64Data
             }
           },
-          EXTRACTION_PROMPT
+          { text: EXTRACTION_PROMPT }
         ];
       } else {
-        console.log('[Pipeline] URL is an HTML webpage.');
+        console.log('[Pipeline] Content detected as HTML webpage.');
         const rawHtml = await urlResponse.text();
         const cleanText = rawHtml
           .replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, '')
@@ -171,23 +187,24 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
 
         if (cleanText.length > 100) {
           contentsPayload = [
-            `Webpage text from (${targetUrl}):\n\n${cleanText.slice(0, 40000)}\n\n${EXTRACTION_PROMPT}`
+            { text: `Webpage text from (${targetUrl}):\n\n${cleanText.slice(0, 40000)}\n\n${EXTRACTION_PROMPT}` }
           ];
         } else {
           contentsPayload = [
-            `Target Web URL: ${targetUrl}. Extract relevant core concepts, technical systems, components, and relationships associated with this entity or subject.\n\n${EXTRACTION_PROMPT}`
+            { text: `Target URL Domain: ${targetUrl}. Extract relevant technical architecture, modules, and relationships.\n\n${EXTRACTION_PROMPT}` }
           ];
         }
       }
     } else {
-      return res.status(400).json({ error: 'Please upload a PDF file or provide a valid URL.' });
+      return res.status(400).json({ error: 'Please supply a PDF file or a valid URL.' });
     }
 
-    // Call Gemini API
+    // Call Gemini API pipeline
     const rawResultText = await callGeminiWithFallback(contentsPayload);
-    const graphPayload = JSON.parse(rawResultText);
+    const cleanedJsonText = cleanJsonResponse(rawResultText);
+    const graphPayload = JSON.parse(cleanedJsonText);
 
-    // Format Nodes for Frontend
+    // Format concepts into Graph Nodes
     const formattedNodes = (graphPayload.concepts || []).map((concept, index) => {
       const slugId = `node-${concept.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const col = index % 3;
@@ -216,7 +233,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       };
     });
 
-    // Format Edges for Frontend
+    // Format relationships into Graph Edges
     const formattedEdges = (graphPayload.relationships || []).map((rel, index) => {
       const sourceId = `node-${rel.source.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
       const targetId = `node-${rel.target.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
@@ -231,7 +248,7 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
 
     storedNodes = [...storedNodes, ...formattedNodes];
 
-    console.log(`[Pipeline] Successfully generated ${formattedNodes.length} nodes and ${formattedEdges.length} edges.`);
+    console.log(`[Pipeline] Completed successfully. Formatted ${formattedNodes.length} nodes and ${formattedEdges.length} edges.`);
 
     res.json({
       success: true,
@@ -240,11 +257,11 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
     });
 
   } catch (err) {
-    console.error('[Pipeline Error]', err);
-    res.status(500).json({ error: 'Extraction failed', details: err.message });
+    console.error('[Pipeline Error Execution Details]:', err);
+    res.status(500).json({ error: 'Graph extraction failed', details: err.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server live on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
