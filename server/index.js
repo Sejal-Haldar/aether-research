@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import pdfParse from 'pdf-parse';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -13,15 +14,14 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Memory storage keeps buffer in memory for direct Gemini inline base64 processing
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB file size limit
+  limits: { fileSize: 50 * 1024 * 1024 }
 });
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Baseline default nodes structure matching frontend state
+// Baseline default nodes matching initial state
 const initialNodes = [
   {
     id: 'node-transformers',
@@ -132,6 +132,40 @@ const initialNodes = [
 
 let storedNodes = [...initialNodes];
 
+// Helper: Model Fallback execution sequence
+async function generateGraphWithFallback(contentsPayload, responseSchema) {
+  const candidateModels = [
+    'gemini-2.5-flash',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash',
+    'gemini-flash-latest'
+  ];
+
+  let lastError = null;
+
+  for (const model of candidateModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: contentsPayload,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: responseSchema,
+          temperature: 0.1
+        }
+      });
+      if (response && response.text) {
+        return response;
+      }
+    } catch (err) {
+      console.warn(`Model ${model} failed, trying next candidate:`, err.message);
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('All Gemini model candidates failed.');
+}
+
 // --- GRAPH API ENDPOINTS ---
 
 app.get('/api/nodes', (req, res) => {
@@ -167,28 +201,42 @@ app.get('/api/graph-data', (req, res) => {
   res.json({ success: true, nodes: storedNodes });
 });
 
-// --- EXTRACTION PIPELINE (ROBUST PDF BUFFER & LINK PROCESSING) ---
+// --- EXTRACTION PIPELINE ---
 
 app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
   try {
     let contentsPayload = [];
+    const promptText = 'Analyze the input thoroughly and extract between 8 to 20 key concepts, components, or entities along with all direct directional relationships between them.';
 
-    // Case 1: Uploaded PDF File (Small or Large)
+    // Case 1: Uploaded PDF File
     if (req.file) {
-      const mimeType = req.file.mimetype || 'application/pdf';
-      const base64Data = req.file.buffer.toString('base64');
+      let extractedPdfText = '';
+      try {
+        const parsedPdf = await pdfParse(req.file.buffer);
+        extractedPdfText = (parsedPdf.text || '').trim();
+      } catch (pdfErr) {
+        console.warn('pdf-parse text extraction skipped, relying on binary vision parse:', pdfErr.message);
+      }
 
-      contentsPayload = [
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: base64Data
-          }
-        },
-        'Analyze the uploaded document and extract key concepts and relationships between them.'
-      ];
+      if (extractedPdfText.length > 50) {
+        contentsPayload = [
+          `Document Content:\n\n${extractedPdfText.slice(0, 60000)}\n\n${promptText}`
+        ];
+      } else {
+        const mimeType = req.file.mimetype || 'application/pdf';
+        const base64Data = req.file.buffer.toString('base64');
+        contentsPayload = [
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data
+            }
+          },
+          promptText
+        ];
+      }
     }
-    // Case 2: Link Input (Web Page or Direct PDF URL)
+    // Case 2: URL Link Input
     else if (req.body && req.body.url) {
       const targetUrl = req.body.url.trim();
 
@@ -206,17 +254,27 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
 
       if (contentType.includes('application/pdf') || targetUrl.toLowerCase().endsWith('.pdf')) {
         const arrayBuffer = await urlResponse.arrayBuffer();
-        const base64Data = Buffer.from(arrayBuffer).toString('base64');
+        const pdfBuffer = Buffer.from(arrayBuffer);
+        
+        let pdfText = '';
+        try {
+          const parsedPdf = await pdfParse(pdfBuffer);
+          pdfText = (parsedPdf.text || '').trim();
+        } catch (e) {}
 
-        contentsPayload = [
-          {
-            inlineData: {
-              mimeType: 'application/pdf',
-              data: base64Data
-            }
-          },
-          'Analyze the PDF document from the link and extract key concepts and relationships between them.'
-        ];
+        if (pdfText.length > 50) {
+          contentsPayload = [`PDF Link Content (${targetUrl}):\n\n${pdfText.slice(0, 60000)}\n\n${promptText}`];
+        } else {
+          contentsPayload = [
+            {
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: pdfBuffer.toString('base64')
+              }
+            },
+            promptText
+          ];
+        }
       } else {
         const textHtml = await urlResponse.text();
         const cleanText = textHtml
@@ -224,17 +282,24 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
           .replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, '')
           .replace(/<[^>]*>?/gm, ' ')
           .replace(/\s+/g, ' ')
-          .slice(0, 50000);
+          .trim();
 
-        contentsPayload = [
-          `Analyze the following webpage content from ${targetUrl} and extract key concepts and relationships between them:\n\n${cleanText}`
-        ];
+        if (cleanText.length > 150) {
+          contentsPayload = [
+            `Webpage Content from ${targetUrl}:\n\n${cleanText.slice(0, 50000)}\n\n${promptText}`
+          ];
+        } else {
+          // Dynamic Single Page Application fallback
+          contentsPayload = [
+            `Target Web URL: ${targetUrl}. Extract key core concepts, underlying technologies, architectures, and relationships relevant to this web domain or subject matter.\n\n${promptText}`
+          ];
+        }
       }
     } else {
       return res.status(400).json({ error: 'Please upload a PDF file or provide a valid URL link.' });
     }
 
-    // JSON Schema for Gemini 3.6 Flash
+    // Response Schema
     const responseSchema = {
       type: Type.OBJECT,
       properties: {
@@ -266,17 +331,8 @@ app.post('/api/extract-graph', upload.single('file'), async (req, res) => {
       required: ['concepts', 'relationships']
     };
 
-    // Execute Gemini 3.6 Flash
-    const modelResponse = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: contentsPayload,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: responseSchema,
-        temperature: 0.1
-      }
-    });
-
+    // Execute via Model Fallback Chain
+    const modelResponse = await generateGraphWithFallback(contentsPayload, responseSchema);
     const graphPayload = JSON.parse(modelResponse.text);
 
     // Format Nodes
