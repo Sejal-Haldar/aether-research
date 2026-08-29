@@ -182,7 +182,7 @@ function validateAnalysis(obj) {
 
 // Updated Model Fallback Sequence with active models
 async function callGeminiWithFallback(contentsPayload) {
-  const candidateModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  const candidateModels = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
   let lastError = null;
 
   for (const model of candidateModels) {
