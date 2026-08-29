@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { ResearchAnalysisData } from '../types/graph';
 import { buildResearchGraph } from '../utils/graphbuilder';
 
+const API_BASE_URL = 'https://aether-research.onrender.com';
+
 export function useIngestion() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<{ message: string; details?: string } | null>(null);
@@ -13,49 +15,51 @@ export function useIngestion() {
     setError(null);
 
     try {
-      let extractRes;
+      let response: Response;
+      const endpoint = `${API_BASE_URL}/api/extract-graph`;
+
       if (type === 'pdf') {
         const formData = new FormData();
         formData.append('file', payload as File);
-        const res = await fetch('/api/ingest/pdf', { method: 'POST', body: formData });
-        extractRes = await res.json();
+
+        response = await fetch(endpoint, {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(120000), // 2-minute timeout limit to prevent aborted requests
+        });
       } else {
-        const res = await fetch('/api/ingest/url', {
+        response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: payload })
+          body: JSON.stringify({ url: payload }),
+          signal: AbortSignal.timeout(120000), // 2-minute timeout limit
         });
-        extractRes = await res.json();
       }
 
-      if (!extractRes.success) {
-        throw new Error(extractRes.error || 'Content extraction failed.');
+      const resJson = await response.json();
+
+      if (!response.ok || !resJson.success) {
+        throw new Error(resJson.error || resJson.details || 'Content extraction and analysis failed.');
       }
 
-      // Trigger AI Analysis
-      const analyzeRes = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: extractRes.title,
-          extractedText: extractRes.extractedText,
-          sourceType: type
-        })
-      });
+      const researchData: ResearchAnalysisData = resJson.data;
+      const documentTitle = resJson.meta?.title || researchData.title || 'Research Document';
 
-      const analyzeJson = await analyzeRes.json();
-      if (!analyzeJson.success) {
-        throw new Error(analyzeJson.error || 'AI content analysis failed.');
-      }
-
-      const researchData: ResearchAnalysisData = analyzeJson.data;
-      const graphData = buildResearchGraph(Date.now().toString(), extractRes.title, researchData);
+      const graphData = buildResearchGraph(
+        Date.now().toString(),
+        documentTitle,
+        researchData
+      );
 
       setAnalysis(researchData);
       setGraph(graphData);
     } catch (err: any) {
       console.error('Ingestion Pipeline Error:', err);
-      setError({ message: err.message || 'An unexpected error occurred during processing.' });
+      let message = err.message || 'An unexpected error occurred during processing.';
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+        message = 'The request timed out while processing the document. Please try again.';
+      }
+      setError({ message });
     } finally {
       setLoading(false);
     }
