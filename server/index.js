@@ -3,9 +3,47 @@ import cors from 'cors';
 import multer from 'multer';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
-import pdfParse from 'pdf-parse';
+import { createRequire } from 'module';
 
 dotenv.config();
+
+// pdf-parse is a CommonJS package whose export shape has changed across
+// versions/builds (plain default function in v1, a named PDFParse class in
+// some v2 builds, etc). A static `import pdfParse from 'pdf-parse'` throws
+// SyntaxError at module-load time (killing the whole server) if Node's ESM
+// interop can't find a `default` export matching what it expects. Using
+// createRequire sidesteps that static analysis entirely — we get the raw
+// CommonJS module.exports at runtime and resolve whichever shape is
+// actually there below, instead of the process failing before it even
+// starts.
+const require = createRequire(import.meta.url);
+const pdfParseRaw = require('pdf-parse');
+
+async function extractPdfText(buffer) {
+  if (typeof pdfParseRaw === 'function') {
+    return pdfParseRaw(buffer);
+  }
+  if (pdfParseRaw && typeof pdfParseRaw.default === 'function') {
+    return pdfParseRaw.default(buffer);
+  }
+  if (pdfParseRaw && typeof pdfParseRaw.pdf === 'function') {
+    return pdfParseRaw.pdf(buffer);
+  }
+  if (pdfParseRaw && typeof pdfParseRaw.PDFParse === 'function') {
+    // v2-style class API: new PDFParse({ data }).getText()
+    const parser = new pdfParseRaw.PDFParse({ data: buffer });
+    const result = await parser.getText();
+    return {
+      text: result.text || '',
+      numpages: result.total ?? result.numpages ?? null,
+      info: result.info || {}
+    };
+  }
+  throw new Error(
+    `Unrecognized pdf-parse export shape (keys: ${Object.keys(pdfParseRaw || {}).join(', ') || typeof pdfParseRaw}). ` +
+    `Update extractPdfText() in server/index.js to match the installed pdf-parse version's actual API.`
+  );
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -214,7 +252,7 @@ class IngestError extends Error {
 async function normalizePdfBuffer(buffer, filenameHint) {
   let parsed;
   try {
-    parsed = await pdfParse(buffer);
+    parsed = await extractPdfText(buffer);
   } catch (err) {
     throw new IngestError('extraction', `Could not parse PDF: ${err.message}`, 422);
   }
